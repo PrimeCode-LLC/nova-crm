@@ -22,10 +22,11 @@ import { UserChip } from "@/components/common/user-chip";
 import { ListPaginationBar } from "@/components/followups/list-pagination-bar";
 import { PRIORITY_TONE } from "@/lib/constants";
 import {
+  followupDisplayTitle,
   followupSendState,
   formatFollowupDueLabel,
   formatFollowupQueuedLabel,
-  isFollowupRetryable,
+  shouldOfferFollowupTryNow,
   type FollowupDueBucket,
 } from "@/lib/followup-due-display";
 import type { FollowupPageSize } from "@/lib/followup-queue-pagination";
@@ -80,12 +81,15 @@ export function FollowupGroup({
   busy: boolean;
 }) {
   const [pageIndex, setPageIndex] = React.useState(0);
+  // Only tint when the bucket has rows — an empty rose/amber card reads like an error overlay.
   const toneRing =
-    tone === "rose"
-      ? "border-destructive/30 bg-destructive/5"
-      : tone === "amber"
-        ? "border-warning/30 bg-warning/5"
-        : "";
+    items.length === 0
+      ? ""
+      : tone === "rose"
+        ? "border-destructive/25 bg-destructive/[0.04]"
+        : tone === "amber"
+          ? "border-warning/25 bg-warning/[0.04]"
+          : "";
 
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
   const safePageIndex = Math.min(pageIndex, totalPages - 1);
@@ -267,14 +271,11 @@ const FollowupRow = React.memo(function FollowupRow({
   const done = Boolean(f.completedAt);
   const sendState = followupSendState(f);
   const queued = sendState === "queued" || sendState === "queued_late";
-  // Try now on a queued row cancels the queued email and re-queues it, which
-  // sends it to the back of the per-mailbox send gap. Only offer it when there
-  // is nothing in flight, or when the send actually needs a retry.
+  const displayTitle = followupDisplayTitle(f);
+  const titleMissing = !f.title?.trim();
+  // Only offer Try now when retry/schedule can actually send — not for body-less reminders.
   const showTryNow =
-    mutate &&
-    !done &&
-    (isFollowupRetryable(f) ||
-      (!queued && (bucket === "overdue" || bucket === "today" || bucket === "failed")));
+    mutate && shouldOfferFollowupTryNow(f, bucket, lead?.channel, { queued });
   const isFailed = sendState === "failed";
   const isRetrying = sendState === "retrying";
   const due = queued
@@ -298,9 +299,10 @@ const FollowupRow = React.memo(function FollowupRow({
       role={lead ? "button" : undefined}
       tabIndex={lead ? 0 : undefined}
       onClick={(e) => {
+        // Base UI Checkbox re-dispatches click onto a sibling hidden <input>.
         if (
           (e.target as HTMLElement).closest(
-            "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit], [data-followup-trynow], [data-followup-reschedule]",
+            "[data-slot=checkbox], [data-followup-select], input[type=checkbox], a, [data-followup-delete], [data-followup-edit], [data-followup-trynow], [data-followup-reschedule]",
           )
         )
           return;
@@ -308,25 +310,45 @@ const FollowupRow = React.memo(function FollowupRow({
       }}
       onKeyDown={(e) => {
         if (!f.leadId) return;
+        if (
+          (e.target as HTMLElement).closest(
+            "[data-slot=checkbox], [data-followup-select], input[type=checkbox]",
+          )
+        )
+          return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onRowNavigate(f.leadId);
         }
       }}
     >
-      <Checkbox
-        checked={selected}
-        onCheckedChange={(v) => onToggleSelect(f.id, v === true)}
-        aria-label={`Select ${f.title}`}
-      />
-      <Checkbox
-        checked={done}
-        onCheckedChange={(v) => onToggleComplete(f.id, v === true)}
-        aria-label={done ? `Mark ${f.title} incomplete` : `Mark ${f.title} complete`}
-      />
+      <div
+        data-followup-select
+        className="flex items-center gap-3 shrink-0"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <Checkbox
+          checked={selected}
+          onCheckedChange={(v) => onToggleSelect(f.id, v === true)}
+          aria-label={`Select ${displayTitle}`}
+        />
+        <Checkbox
+          checked={done}
+          onCheckedChange={(v) => onToggleComplete(f.id, v === true)}
+          aria-label={done ? `Mark ${displayTitle} incomplete` : `Mark ${displayTitle} complete`}
+        />
+      </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium truncate">{f.title}</span>
+          <span
+            className={cn(
+              "text-sm font-medium truncate",
+              titleMissing && "text-muted-foreground italic",
+            )}
+          >
+            {displayTitle}
+          </span>
           <Badge
             className={cn(
               "rounded-md border-transparent text-[10px]",
@@ -365,7 +387,7 @@ const FollowupRow = React.memo(function FollowupRow({
             </Badge>
           )}
         </div>
-        {lead && (
+        {lead ? (
           <Link
             href={`/leads/${lead.id}`}
             className="text-xs text-muted-foreground hover:text-primary truncate block mt-0.5"
@@ -373,6 +395,10 @@ const FollowupRow = React.memo(function FollowupRow({
           >
             {lead.contactName} · {lead.companyName}
           </Link>
+        ) : (
+          <span className="text-xs text-muted-foreground/80 italic truncate block mt-0.5">
+            {f.leadId ? "Lead unavailable in this workspace" : "No lead linked"}
+          </span>
         )}
       </div>
       <div className="flex items-center gap-2 shrink-0">

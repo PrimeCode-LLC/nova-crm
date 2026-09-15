@@ -28,6 +28,10 @@ import type { LeadFollowupAiContext } from "@/components/ai/suggest-followups-di
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { recordFollowupSuggestAccept } from "@/lib/ai/record-followup-suggest-accept-client";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
+import {
+  normalizeFollowupTitle,
+  resolveFollowupOwnerId,
+} from "@/lib/followup-due-display";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import type {
   Followup,
@@ -418,7 +422,7 @@ export function BulkBuildSequencesDialog({
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? `fp-${crypto.randomUUID()}`
         : `fp-${Date.now()}`;
-    const ownerId = lead.ownerId ?? currentUserId;
+    const ownerId = resolveFollowupOwnerId(lead.ownerId, currentUserId);
     const plan: FollowupPlan = {
       id: planId,
       leadId: lead.id,
@@ -435,7 +439,12 @@ export function BulkBuildSequencesDialog({
     const created: Followup[] = items.map((it, i) => ({
       id: newFollowupId(),
       leadId: lead.id,
-      title: it.title.trim(),
+      title: normalizeFollowupTitle({
+        title: it.title,
+        emailSubject: it.emailSubject,
+        channel: it.channel,
+        stepIndex: i,
+      }),
       description: it.description?.trim() || undefined,
       messageBody: it.messageBody.trim(),
       emailSubject: it.emailSubject?.trim() || undefined,

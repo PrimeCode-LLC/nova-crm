@@ -110,3 +110,76 @@ WHERE d.collection_root = 'followups'
     SELECT 1 FROM scheduled_emails se
     WHERE se.id = d.payload->>'scheduledEmailId'
   );
+
+\echo '== 9. Sparse open followups (empty title / owner) — UI "Medium + Try now" rows =='
+SELECT
+  CASE
+    WHEN coalesce(trim(payload->>'title'), '') = '' THEN 'empty_title'
+    ELSE 'has_title'
+  END AS title_state,
+  CASE
+    WHEN coalesce(trim(payload->>'ownerId'), '') = '' THEN 'unassigned'
+    ELSE 'assigned'
+  END AS owner_state,
+  CASE
+    WHEN coalesce(trim(payload->>'leadId'), '') = '' THEN 'no_lead'
+    ELSE 'has_lead'
+  END AS lead_state,
+  coalesce(payload->>'channel', '(none)') AS channel,
+  coalesce(payload->>'priority', '(default)') AS priority,
+  count(*) AS rows,
+  min(payload->>'dueAt') AS oldest_due_at,
+  max(payload->>'dueAt') AS newest_due_at
+FROM pg_documents
+WHERE collection_root = 'followups'
+  AND coalesce(payload->>'completedAt', '') = ''
+  AND coalesce(payload->>'pausedAt', '') = ''
+GROUP BY 1, 2, 3, 4, 5
+HAVING
+  CASE WHEN coalesce(trim(payload->>'title'), '') = '' THEN 'empty_title' ELSE 'has_title' END
+    = 'empty_title'
+  OR CASE WHEN coalesce(trim(payload->>'ownerId'), '') = '' THEN 'unassigned' ELSE 'assigned' END
+    = 'unassigned'
+ORDER BY rows DESC;
+
+\echo '== 10. Same-instant dueAt clusters among untitled open followups =='
+SELECT
+  payload->>'dueAt' AS due_at,
+  count(*) AS rows,
+  count(*) FILTER (WHERE coalesce(trim(payload->>'title'), '') = '') AS empty_title,
+  count(*) FILTER (WHERE coalesce(trim(payload->>'ownerId'), '') = '') AS unassigned,
+  count(*) FILTER (WHERE coalesce(trim(payload->>'leadId'), '') = '') AS no_lead,
+  min(left(coalesce(payload->>'emailSubject', ''), 80)) AS sample_subject,
+  min(coalesce(payload->>'channel', '')) AS sample_channel,
+  min(path) AS sample_path
+FROM pg_documents
+WHERE collection_root = 'followups'
+  AND coalesce(payload->>'completedAt', '') = ''
+  AND coalesce(payload->>'pausedAt', '') = ''
+  AND (
+    coalesce(trim(payload->>'title'), '') = ''
+    OR coalesce(trim(payload->>'ownerId'), '') = ''
+  )
+GROUP BY payload->>'dueAt'
+HAVING count(*) > 1
+ORDER BY rows DESC
+LIMIT 25;
+
+\echo '== 11. Sample untitled open followups (repair candidates) =='
+SELECT
+  path,
+  organization_id,
+  left(coalesce(payload->>'title', ''), 40) AS title,
+  left(coalesce(payload->>'emailSubject', ''), 60) AS email_subject,
+  payload->>'ownerId' AS owner_id,
+  payload->>'leadId' AS lead_id,
+  payload->>'channel' AS channel,
+  payload->>'dueAt' AS due_at,
+  payload->>'planId' AS plan_id,
+  payload->>'aiGenerated' AS ai_generated
+FROM pg_documents
+WHERE collection_root = 'followups'
+  AND coalesce(payload->>'completedAt', '') = ''
+  AND coalesce(trim(payload->>'title'), '') = ''
+ORDER BY payload->>'dueAt' DESC NULLS LAST
+LIMIT 40;

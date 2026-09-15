@@ -141,6 +141,85 @@ export function planFollowupTryNow(
   return { kind: "bump_due" };
 }
 
+/**
+ * Row label when `title` is missing/blank. Prefer subject, then a channel cue,
+ * never an empty string that leaves only the priority badge visible.
+ */
+export function followupDisplayTitle(
+  f: Pick<Followup, "title" | "emailSubject" | "channel">,
+): string {
+  const title = f.title?.trim();
+  if (title) return title;
+  const subject = f.emailSubject?.trim();
+  if (subject) return subject;
+  const channel = f.channel?.trim();
+  if (channel?.startsWith("linkedin")) return "LinkedIn step";
+  if (
+    channel === "cold_email" ||
+    channel === "personalized_email" ||
+    channel === "website_form"
+  ) {
+    return "Email step";
+  }
+  return "Untitled followup";
+}
+
+/** Non-empty owner for new followups — empty string must not win over the actor. */
+export function resolveFollowupOwnerId(
+  leadOwnerId: string | undefined | null,
+  currentUserId: string,
+): string {
+  return leadOwnerId?.trim() || currentUserId.trim();
+}
+
+/** Title to persist on create/accept — never write a blank title. */
+export function normalizeFollowupTitle(input: {
+  title?: string | null;
+  emailSubject?: string | null;
+  channel?: Followup["channel"];
+  stepIndex?: number;
+}): string {
+  const title = input.title?.trim();
+  if (title) return title;
+  const subject = input.emailSubject?.trim();
+  if (subject) return subject;
+  const channel = input.channel?.trim();
+  if (channel?.startsWith("linkedin")) {
+    return input.stepIndex != null ? `LinkedIn ${input.stepIndex + 1}` : "LinkedIn step";
+  }
+  if (
+    channel === "cold_email" ||
+    channel === "personalized_email" ||
+    channel === "website_form"
+  ) {
+    return input.stepIndex != null ? `Email ${input.stepIndex + 1}` : "Email step";
+  }
+  return input.stepIndex != null ? `Follow-up ${input.stepIndex + 1}` : "Follow-up";
+}
+
+/**
+ * Whether the Followups list should show Try now. Hide when the only plan is
+ * bump_due (no body / not email) — those rows need Edit or Reschedule instead.
+ */
+export function shouldOfferFollowupTryNow(
+  f: Followup,
+  bucket: FollowupDueBucket,
+  leadChannel: ChannelKey | undefined,
+  options?: { queued?: boolean },
+): boolean {
+  if (f.completedAt || f.pausedAt) return false;
+  if (isFollowupRetryable(f)) return true;
+  const queued =
+    options?.queued ??
+    (() => {
+      const state = followupSendState(f);
+      return state === "queued" || state === "queued_late";
+    })();
+  if (queued) return false;
+  if (bucket !== "overdue" && bucket !== "today" && bucket !== "failed") return false;
+  return planFollowupTryNow(f, leadChannel).kind !== "bump_due";
+}
+
 /** ASAP send time: at least ~90s out, staggered for bulk. */
 export function tryNowScheduleAtIso(index = 0, now = Date.now()): string {
   return new Date(now + 90_000 + index * 60_000).toISOString();

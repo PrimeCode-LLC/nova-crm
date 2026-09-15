@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   dueAtForReschedulePreset,
+  followupDisplayTitle,
   followupSendState,
   formatFollowupDueLabel,
   formatFollowupQueuedLabel,
   isFollowupQueuedForSend,
   isFollowupRetryable,
   nextWeekdayYmd,
+  normalizeFollowupTitle,
   planFollowupTryNow,
+  resolveFollowupOwnerId,
+  shouldOfferFollowupTryNow,
 } from "@/lib/followup-due-display";
 
 describe("formatFollowupDueLabel", () => {
@@ -194,5 +198,73 @@ describe("planFollowupTryNow", () => {
         "linkedin_outbound",
       ),
     ).toEqual({ kind: "bump_due" });
+  });
+});
+
+describe("followupDisplayTitle", () => {
+  it("falls back to subject then channel cue", () => {
+    expect(followupDisplayTitle({ title: "  ", emailSubject: "Hello" })).toBe("Hello");
+    expect(followupDisplayTitle({ title: "", channel: "linkedin_outbound" })).toBe(
+      "LinkedIn step",
+    );
+    expect(followupDisplayTitle({ title: "" })).toBe("Untitled followup");
+  });
+});
+
+describe("normalizeFollowupTitle / resolveFollowupOwnerId", () => {
+  it("never persists a blank title", () => {
+    expect(normalizeFollowupTitle({ title: "  ", stepIndex: 0 })).toBe("Follow-up 1");
+    expect(
+      normalizeFollowupTitle({
+        title: "",
+        emailSubject: "Intro",
+        channel: "cold_email",
+      }),
+    ).toBe("Intro");
+  });
+
+  it("does not treat empty ownerId as assigned", () => {
+    expect(resolveFollowupOwnerId("", "actor")).toBe("actor");
+    expect(resolveFollowupOwnerId("  ", "actor")).toBe("actor");
+    expect(resolveFollowupOwnerId("lead-owner", "actor")).toBe("lead-owner");
+  });
+});
+
+describe("shouldOfferFollowupTryNow", () => {
+  it("hides Try now when nothing can be sent", () => {
+    expect(
+      shouldOfferFollowupTryNow(
+        {
+          id: "f1",
+          title: "",
+          dueAt: "2026-08-01T12:00:00.000Z",
+          ownerId: "",
+          priority: "medium",
+          auto: false,
+        },
+        "today",
+        "cold_email",
+      ),
+    ).toBe(false);
+  });
+
+  it("shows Try now for email-ready due-today steps", () => {
+    expect(
+      shouldOfferFollowupTryNow(
+        {
+          id: "f1",
+          title: "Email 1",
+          dueAt: "2026-08-01T12:00:00.000Z",
+          ownerId: "u1",
+          priority: "high",
+          auto: true,
+          messageBody: "Hi",
+          emailSubject: "Hello",
+          channel: "cold_email",
+        },
+        "today",
+        "cold_email",
+      ),
+    ).toBe(true);
   });
 });

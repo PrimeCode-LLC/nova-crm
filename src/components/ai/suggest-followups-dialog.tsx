@@ -53,6 +53,10 @@ import { useChannelOptions } from "@/hooks/use-channel-options";
 import { channelLabelFromValue } from "@/lib/channel-options";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
 import {
+  normalizeFollowupTitle,
+  resolveFollowupOwnerId,
+} from "@/lib/followup-due-display";
+import {
   hasActiveFollowUpAfterDate,
   sequenceCadenceStartFromWaitUntil,
 } from "@/lib/email/ooo-return-date";
@@ -414,7 +418,7 @@ export function SuggestFollowupsDialog({
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? `fp-${crypto.randomUUID()}`
         : `fp-${Date.now()}`;
-    const ownerId = lead.ownerId ?? currentUserId;
+    const ownerId = resolveFollowupOwnerId(lead.ownerId, currentUserId);
     const plan: FollowupPlan = {
       id: planId,
       leadId: lead.id,
@@ -429,10 +433,15 @@ export function SuggestFollowupsDialog({
       threadAnchor,
       sourceScriptId: scriptId || undefined,
     };
-    const created: Followup[] = selected.map((it) => ({
+    const created: Followup[] = selected.map((it, i) => ({
       id: newFollowupId(),
       leadId: lead.id,
-      title: it.title.trim(),
+      title: normalizeFollowupTitle({
+        title: it.title,
+        emailSubject: it.emailSubject,
+        channel: it.channel,
+        stepIndex: i,
+      }),
       description: it.description?.trim() || undefined,
       messageBody: it.messageBody.trim(),
       emailSubject: it.emailSubject?.trim() || undefined,

@@ -139,6 +139,10 @@ import {
 } from "@/lib/leads/lead-archive";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
 import { mergeFollowupPlans, SUPERSEDED_STEP_CANCEL_REASON } from "@/lib/followup-plans";
+import {
+  normalizeFollowupTitle,
+  resolveFollowupOwnerId,
+} from "@/lib/followup-due-display";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { canAction } from "@/lib/permissions/can";
 import {
@@ -1082,17 +1086,27 @@ export function WorkspaceModeProvider({
 
   const addFollowup = React.useCallback(
     (f: Followup) => {
+      const actorId = viewerUid?.trim() || f.ownerId || "";
+      const normalized: Followup = {
+        ...f,
+        title: normalizeFollowupTitle({
+          title: f.title,
+          emailSubject: f.emailSubject,
+          channel: f.channel,
+        }),
+        ownerId: resolveFollowupOwnerId(f.ownerId, actorId),
+      };
       const iso = new Date().toISOString();
       const timeline: TimelineEvent | null =
-        f.leadId
+        normalized.leadId
           ? {
               id: newLocalId("te-local"),
-              leadId: f.leadId,
+              leadId: normalized.leadId,
               type: "followup_created",
-              actorId: f.ownerId,
-              summary: `Scheduled follow-up: ${f.title}`,
+              actorId: normalized.ownerId,
+              summary: `Scheduled follow-up: ${normalized.title}`,
               createdAt: iso,
-              payload: { followupId: f.id },
+              payload: { followupId: normalized.id },
             }
           : null;
       const writeFs =
@@ -1102,14 +1116,14 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = requireWorkspaceDb();
-            await persistFollowupCreate(db, orgId, f);
-            if (f.leadId) await persistLeadActivityBump(db, f.leadId);
+            await persistFollowupCreate(db, orgId, normalized);
+            if (normalized.leadId) await persistLeadActivityBump(db, normalized.leadId);
             if (timeline) {
               await persistTimelineEventCreate(
                 db,
                 orgId,
                 timeline,
-                leadOwnerIdForFirestore(f.leadId!),
+                leadOwnerIdForFirestore(normalized.leadId!),
               );
             }
           } catch (e) {
@@ -1123,42 +1137,57 @@ export function WorkspaceModeProvider({
       setSessionV2((s) => {
         const next: WorkspaceSessionV2 = {
           ...s,
-          followups: { ...s.followups, extras: [...s.followups.extras, f] },
+          followups: { ...s.followups, extras: [...s.followups.extras, normalized] },
           timelineAdded: timeline ? [...s.timelineAdded, timeline] : s.timelineAdded,
         };
-        if (!f.leadId) return next;
+        if (!normalized.leadId) return next;
         if (writeFs) return next;
         return {
           ...next,
           leadActivity: {
             ...next.leadActivity,
-            [f.leadId]: {
-              bump: (next.leadActivity[f.leadId]?.bump ?? 0) + 1,
+            [normalized.leadId]: {
+              bump: (next.leadActivity[normalized.leadId]?.bump ?? 0) + 1,
               lastAt: iso,
             },
           },
         };
       });
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore, viewerUid],
   );
 
   const createFollowupPlanWithFollowups = React.useCallback(
     (plan: FollowupPlan, items: Followup[], options?: { skipTimeline?: boolean }) => {
+      const actorId = viewerUid?.trim() || plan.ownerId || "";
+      const normalizedPlan: FollowupPlan = {
+        ...plan,
+        ownerId: resolveFollowupOwnerId(plan.ownerId, actorId),
+      };
+      const normalizedItems = items.map((f, i) => ({
+        ...f,
+        title: normalizeFollowupTitle({
+          title: f.title,
+          emailSubject: f.emailSubject,
+          channel: f.channel,
+          stepIndex: i,
+        }),
+        ownerId: resolveFollowupOwnerId(f.ownerId, actorId),
+      }));
       const iso = new Date().toISOString();
       const skipTimeline = options?.skipTimeline === true;
       const timelines: TimelineEvent[] = skipTimeline
         ? []
-        : items
+        : normalizedItems
             .filter((f): f is Followup & { leadId: string } => Boolean(f.leadId))
             .map((f) => ({
               id: newLocalId("te-local"),
               leadId: f.leadId,
               type: "followup_created" as const,
-              actorId: f.ownerId || plan.ownerId,
+              actorId: f.ownerId || normalizedPlan.ownerId,
               summary: `Scheduled follow-up: ${f.title}`,
               createdAt: iso,
-              payload: { followupId: f.id, planId: plan.id },
+              payload: { followupId: f.id, planId: normalizedPlan.id },
             }));
       const writeFs =
         canPersistWorkspaceDocsLive();
@@ -1167,11 +1196,11 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = requireWorkspaceDb();
-            await persistFollowupPlanCreate(db, orgId, plan);
-            for (const f of items) {
+            await persistFollowupPlanCreate(db, orgId, normalizedPlan);
+            for (const f of normalizedItems) {
               await persistFollowupCreate(db, orgId, f);
             }
-            if (plan.leadId) await persistLeadActivityBump(db, plan.leadId);
+            if (normalizedPlan.leadId) await persistLeadActivityBump(db, normalizedPlan.leadId);
             for (const te of timelines) {
               await persistTimelineEventCreate(
                 db,
@@ -1192,16 +1221,16 @@ export function WorkspaceModeProvider({
         ...s,
         followupPlans: {
           ...s.followupPlans,
-          extras: [...s.followupPlans.extras, plan],
+          extras: [...s.followupPlans.extras, normalizedPlan],
         },
         followups: {
           ...s.followups,
-          extras: [...s.followups.extras, ...items],
+          extras: [...s.followups.extras, ...normalizedItems],
         },
         timelineAdded: timelines.length ? [...s.timelineAdded, ...timelines] : s.timelineAdded,
       }));
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore, viewerUid],
   );
 
   const pauseFollowupPlanForReply = React.useCallback(
