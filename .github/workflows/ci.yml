@@ -232,13 +232,15 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-${{ matrix.image }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.cache_scope }}
           cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
-          build-args: ${{ matrix.image == 'web' && format('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY={0}
-NEXT_PUBLIC_AUTH_CLERK_V1=true
-NEXT_PUBLIC_SITE_URL={1}
-NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true
-NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
-NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
-NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true', env.WEB_CLERK_PK, env.WEB_SITE_URL) || '' }}
+          # Unused on non-web images; Docker ignores ARG names that Dockerfile never declares.
+          build-args: |
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ env.WEB_CLERK_PK }}
+            NEXT_PUBLIC_AUTH_CLERK_V1=true
+            NEXT_PUBLIC_SITE_URL=${{ env.WEB_SITE_URL }}
+            NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true
+            NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
+            NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
+            NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
 
   # Continuous delivery: a green push to feature/remove-firebase deploys the exact
   # SHA whose images publish-ghcr just pushed. `environment: production` is required
