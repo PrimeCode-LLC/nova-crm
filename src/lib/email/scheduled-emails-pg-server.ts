@@ -82,10 +82,15 @@ export async function createScheduledEmailPgServer(input: {
   referenceIds?: string[];
   forceNewThread?: boolean;
 }): Promise<{ ok: true; id: string } | { error: string }> {
-  const { assertSendingAllowed } = await import(
+  const { assertSendingAllowed, resolveArmIdForSend } = await import(
     "@/lib/email/outreach-circuit-breaker-server"
   );
-  const gate = await assertSendingAllowed(input.organizationId);
+  const armId = await resolveArmIdForSend({
+    organizationId: input.organizationId,
+    followupId: input.followupId,
+    leadId: input.leadId,
+  });
+  const gate = await assertSendingAllowed(input.organizationId, { armId });
   if (!gate.allowed) {
     return { error: gate.reason ?? "Outreach sending is paused by circuit breaker" };
   }

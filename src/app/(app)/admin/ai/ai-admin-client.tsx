@@ -386,6 +386,37 @@ export function AiAdminClient() {
                           }
                         />
                       </div>
+                      <div className="grid gap-2">
+                        <Label>Seed addresses (deliverability)</Label>
+                        <Textarea
+                          placeholder={"one@seed.inbox\ntwo@seed.inbox"}
+                          className="min-h-[72px] font-mono text-xs"
+                          value={(settings?.seedAddresses ?? []).join("\n")}
+                          onChange={(e) =>
+                            setSettings((s) =>
+                              s
+                                ? {
+                                    ...s,
+                                    seedAddresses: e.target.value
+                                      .split(/[\n,]+/)
+                                      .map((x) => x.trim())
+                                      .filter(Boolean),
+                                  }
+                                : s,
+                            )
+                          }
+                          onBlur={() =>
+                            settings &&
+                            void saveSettings({
+                              seedAddresses: settings.seedAddresses ?? [],
+                            })
+                          }
+                        />
+                        <p className="text-muted-foreground text-xs">
+                          Injected into bulk sequence schedules as probe emails. Sent events are
+                          tagged with seedAddress meta and excluded from scorecards.
+                        </p>
+                      </div>
                     </CardContent>
                   </Card>
 

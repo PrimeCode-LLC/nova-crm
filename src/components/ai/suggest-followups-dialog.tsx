@@ -200,6 +200,8 @@ export function SuggestFollowupsDialog({
   const [threadAnchor, setThreadAnchor] = React.useState<FollowupPlan["threadAnchor"]>();
   const [generationId, setGenerationId] = React.useState<string | undefined>();
   const [configId, setConfigId] = React.useState<string | undefined>();
+  const [experimentId, setExperimentId] = React.useState<string | undefined>();
+  const [armId, setArmId] = React.useState<string | undefined>();
 
   React.useEffect(() => {
     if (!open) return;
@@ -276,6 +278,8 @@ export function SuggestFollowupsDialog({
       threadAnchor?: FollowupPlan["threadAnchor"];
       generationId?: string;
       configId?: string;
+      experimentId?: string | null;
+      armId?: string | null;
     },
     mode: FollowupSequenceMode = sequenceMode,
   ) {
@@ -289,6 +293,14 @@ export function SuggestFollowupsDialog({
     );
     setConfigId(
       typeof data.configId === "string" && data.configId.trim() ? data.configId.trim() : undefined,
+    );
+    setExperimentId(
+      typeof data.experimentId === "string" && data.experimentId.trim()
+        ? data.experimentId.trim()
+        : undefined,
+    );
+    setArmId(
+      typeof data.armId === "string" && data.armId.trim() ? data.armId.trim() : undefined,
     );
     const apiItems = (data.items ?? []) as SuggestApiItem[];
     const includeInitial = mode === "full";
@@ -428,6 +440,8 @@ export function SuggestFollowupsDialog({
     void recordFollowupSuggestAccept({
       generationId,
       configId,
+      experimentId,
+      armId,
       planId,
       leadId: lead.id,
       steps: created.map((f, i) => ({

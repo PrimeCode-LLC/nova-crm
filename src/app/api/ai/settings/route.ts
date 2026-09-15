@@ -30,6 +30,8 @@ const patchSchema = z
     embeddingModel: z.string().max(120).optional(),
     embeddingProvider: z.enum(["openai", "anthropic", "google"]).optional(),
     features: z.record(z.string(), z.unknown()).optional(),
+    /** Inbox-placement seed inboxes (injected into bulk outbound batches). */
+    seedAddresses: z.array(z.string().email().max(320)).max(20).optional(),
   })
   .strict();
 

@@ -49,6 +49,11 @@ export interface OrganizationAiSettings {
   embeddingProvider?: AiProvider;
   /** Layered Fit Check RAG: global + per-category libraries with connect toggles. */
   fitCheckKnowledge?: FitCheckKnowledgeConfig;
+  /**
+   * Seed addresses injected into bulk outbound batches for inbox-vs-spam
+   * placement monitoring (recorded on email_events.meta.seedAddress).
+   */
+  seedAddresses?: string[];
   updatedAt?: string;
 }
 

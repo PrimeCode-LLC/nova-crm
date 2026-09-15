@@ -9,6 +9,8 @@ export async function recordFollowupSuggestAccept(input: {
   planId: string;
   leadId: string;
   zone?: string;
+  experimentId?: string | null;
+  armId?: string | null;
   steps: Array<{
     followupId: string;
     stepIndex: number;
@@ -28,6 +30,8 @@ export async function recordFollowupSuggestAccept(input: {
         planId: input.planId,
         leadId: input.leadId,
         zone: input.zone ?? "default",
+        experimentId: input.experimentId ?? undefined,
+        variantId: input.armId ?? undefined,
         steps: input.steps,
       }),
     });

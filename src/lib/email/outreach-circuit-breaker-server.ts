@@ -6,12 +6,19 @@ import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { recordAudit } from "@/lib/documents/audit";
 import { getOutreachConfigScorecard } from "@/lib/ai/eval/scorecard-server";
+import { withOrganizationScope } from "@/lib/db/tenant-scope";
+import { isDatabaseConfigured } from "@/lib/db/prisma";
 
 export type CircuitBreakerState = {
   orgPaused: boolean;
   pausedArmIds: string[];
   reason?: string;
   trippedAt?: string;
+  /** Trailing org baseline rates used for 2× arm trips. */
+  baseline?: {
+    unsubscribeRate: number;
+    hardNoRate: number;
+  };
 };
 
 const ORG_SETTINGS_DOC = "outreachCircuitBreaker";
@@ -36,6 +43,10 @@ export async function getCircuitBreakerState(
       : [],
     reason: typeof data.reason === "string" ? data.reason : undefined,
     trippedAt: typeof data.trippedAt === "string" ? data.trippedAt : undefined,
+    baseline:
+      data.baseline && typeof data.baseline === "object"
+        ? (data.baseline as CircuitBreakerState["baseline"])
+        : undefined,
   };
 }
 
@@ -59,6 +70,33 @@ async function setCircuitBreakerState(
     );
 }
 
+/** Mean rates across org scorecards with enough delivery (trailing proxy). */
+async function orgTrailingBaseline(organizationId: string): Promise<{
+  unsubscribeRate: number;
+  hardNoRate: number;
+}> {
+  if (!isDatabaseConfigured()) {
+    return { unsubscribeRate: 0.01, hardNoRate: 0.01 };
+  }
+  const cards = await withOrganizationScope(organizationId, async (tx) =>
+    tx.outreachConfigScorecard.findMany({
+      where: { organizationId, delivered: { gte: 50 } },
+      select: { unsubscribeRate: true, hardNoRate: true },
+      take: 50,
+    }),
+  );
+  if (cards.length === 0) {
+    return { unsubscribeRate: 0.01, hardNoRate: 0.01 };
+  }
+  const unsub =
+    cards.reduce((s, c) => s + c.unsubscribeRate, 0) / cards.length;
+  const hard = cards.reduce((s, c) => s + c.hardNoRate, 0) / cards.length;
+  return {
+    unsubscribeRate: Math.max(0.005, unsub),
+    hardNoRate: Math.max(0.005, hard),
+  };
+}
+
 export async function evaluateCircuitBreakerForConfig(input: {
   organizationId: string;
   configId: string;
@@ -68,6 +106,7 @@ export async function evaluateCircuitBreakerForConfig(input: {
   const current = await getCircuitBreakerState(input.organizationId);
   if (!scorecard || scorecard.sent < 50) return current;
 
+  const baseline = await orgTrailingBaseline(input.organizationId);
   let orgPaused = current.orgPaused;
   const pausedArmIds = new Set(current.pausedArmIds);
   let reason = current.reason;
@@ -80,12 +119,15 @@ export async function evaluateCircuitBreakerForConfig(input: {
     orgPaused = true;
     reason = `Spam complaint rate ${(100 * scorecard.spamComplaintRate).toFixed(2)}% > 0.1%`;
   }
-  // Arm-level: unsubscribe or hard_no at 2x of a soft baseline 1%
-  if (scorecard.unsubscribeRate > 0.02 || scorecard.hardNoRate > 0.02) {
-    if (input.armId) pausedArmIds.add(input.armId);
+
+  // Arm-level: unsubscribe or hard_no more than 2× trailing org baseline.
+  const unsubTrip = scorecard.unsubscribeRate > baseline.unsubscribeRate * 2;
+  const hardTrip = scorecard.hardNoRate > baseline.hardNoRate * 2;
+  if ((unsubTrip || hardTrip) && input.armId) {
+    pausedArmIds.add(input.armId);
     reason =
       reason ??
-      `Unsubscribe/hard_no elevated (unsub=${(100 * scorecard.unsubscribeRate).toFixed(1)}% hard_no=${(100 * scorecard.hardNoRate).toFixed(1)}%)`;
+      `Arm ${input.armId} paused: unsub/hard_no >2× baseline (unsub=${(100 * scorecard.unsubscribeRate).toFixed(1)}% vs ${(100 * baseline.unsubscribeRate).toFixed(1)}%; hard_no=${(100 * scorecard.hardNoRate).toFixed(1)}% vs ${(100 * baseline.hardNoRate).toFixed(1)}%)`;
   }
 
   const next: CircuitBreakerState = {
@@ -93,9 +135,14 @@ export async function evaluateCircuitBreakerForConfig(input: {
     pausedArmIds: [...pausedArmIds],
     reason,
     trippedAt: orgPaused || pausedArmIds.size ? new Date().toISOString() : current.trippedAt,
+    baseline,
   };
 
-  if (orgPaused !== current.orgPaused || pausedArmIds.size !== current.pausedArmIds.length) {
+  if (
+    orgPaused !== current.orgPaused ||
+    pausedArmIds.size !== current.pausedArmIds.length ||
+    [...pausedArmIds].some((id) => !current.pausedArmIds.includes(id))
+  ) {
     await setCircuitBreakerState(input.organizationId, next);
     void recordAudit({
       organizationId: input.organizationId,
@@ -131,7 +178,10 @@ export async function clearCircuitBreaker(input: {
   }
 }
 
-export async function assertSendingAllowed(organizationId: string): Promise<{
+export async function assertSendingAllowed(
+  organizationId: string,
+  opts?: { armId?: string | null },
+): Promise<{
   allowed: boolean;
   reason?: string;
 }> {
@@ -139,5 +189,46 @@ export async function assertSendingAllowed(organizationId: string): Promise<{
   if (state.orgPaused) {
     return { allowed: false, reason: state.reason ?? "Outreach paused by circuit breaker" };
   }
+  const armId = opts?.armId?.trim();
+  if (armId && state.pausedArmIds.includes(armId)) {
+    return {
+      allowed: false,
+      reason: `Experiment arm ${armId} is paused by circuit breaker`,
+    };
+  }
   return { allowed: true };
+}
+
+/** Resolve armId from provenance for a followup or lead (best-effort). */
+export async function resolveArmIdForSend(input: {
+  organizationId: string;
+  followupId?: string;
+  leadId?: string;
+}): Promise<string | null> {
+  if (!isDatabaseConfigured()) return null;
+  return withOrganizationScope(input.organizationId, async (tx) => {
+    if (input.followupId) {
+      const row = await tx.sequenceStepProvenance.findFirst({
+        where: {
+          organizationId: input.organizationId,
+          followupId: input.followupId,
+        },
+        select: { variantId: true, experimentId: true },
+      });
+      if (row?.variantId) return row.variantId;
+    }
+    if (input.leadId) {
+      const row = await tx.sequenceStepProvenance.findFirst({
+        where: {
+          organizationId: input.organizationId,
+          leadId: input.leadId,
+          variantId: { not: null },
+        },
+        orderBy: { createdAt: "desc" },
+        select: { variantId: true },
+      });
+      return row?.variantId ?? null;
+    }
+    return null;
+  });
 }

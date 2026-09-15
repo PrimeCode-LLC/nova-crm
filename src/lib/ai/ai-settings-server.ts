@@ -177,12 +177,14 @@ export async function getAiPromptServer(
   };
 }
 
-/** Writes platform-global prompts (product-wide). Org id is unused for storage. */
+/** Writes org-scoped prompts (multi-tenant safe). */
 export async function upsertAiPromptServer(
-  _organizationId: string,
+  organizationId: string,
   prompt: Pick<AiPromptTemplate, "featureKey" | "systemPrompt" | "userPromptTemplate">,
 ): Promise<{ ok: true } | { error: string }> {
-  const ref = platformPromptDoc(prompt.featureKey);
+  const orgId = organizationId.trim();
+  if (!orgId) return { error: "organizationId required" };
+  const ref = orgPromptDoc(orgId, prompt.featureKey);
   if (!ref) return { error: "Database not configured" };
   const existingSnap = await ref.get();
   const existingVersion =

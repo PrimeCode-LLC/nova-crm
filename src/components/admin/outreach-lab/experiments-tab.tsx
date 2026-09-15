@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 
 type ConfigOption = { id: string; label: string };
@@ -34,6 +35,7 @@ export function ExperimentsTab(props: { configs: ConfigOption[] }) {
   const [leadIdsText, setLeadIdsText] = React.useState("");
   const [stage, setStage] = React.useState<1 | 2>(1);
   const [busy, setBusy] = React.useState(false);
+  const [skipAaGate, setSkipAaGate] = React.useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -80,6 +82,7 @@ export function ExperimentsTab(props: { configs: ConfigOption[] }) {
           controlConfigId,
           variantConfigId,
           leadIds,
+          skipAaGate: skipAaGate || undefined,
         }),
       });
       const data = await res.json();
@@ -88,6 +91,13 @@ export function ExperimentsTab(props: { configs: ConfigOption[] }) {
         return;
       }
       toast.success(`Experiment started · ${data.assigned} assigned`);
+      if (typeof data.experimentId === "string") {
+        try {
+          sessionStorage.setItem("outreachExperimentId", data.experimentId);
+        } catch {
+          /* ignore */
+        }
+      }
       setName("");
       setHypothesis("");
       setLeadIdsText("");
@@ -180,6 +190,16 @@ export function ExperimentsTab(props: { configs: ConfigOption[] }) {
                 placeholder="lead-abc&#10;lead-def"
               />
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="skip-aa"
+              checked={skipAaGate}
+              onCheckedChange={(v) => setSkipAaGate(v === true)}
+            />
+            <Label htmlFor="skip-aa" className="text-sm font-normal">
+              Skip A/A gate (override — only after reviewing assignment risk)
+            </Label>
           </div>
           <Button size="sm" disabled={busy || configs.length < 2} onClick={() => void start()}>
             {busy ? "Starting…" : "Start experiment"}

@@ -7,6 +7,13 @@ import { withOrganizationScope, withRlsBypass } from "@/lib/db/tenant-scope";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { betaPosterior } from "@/lib/ai/eval/posterior";
 import { attributeReplyToConfig } from "@/lib/ai/eval/reply-attribution";
+import {
+  bumpSegment,
+  segmentsToJson,
+  seniorityBracketFromTitle,
+} from "@/lib/ai/eval/segment-buckets";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 const POSITIVE = new Set(["positive", "meeting_ready"]);
 const ENGAGED = new Set([
@@ -17,6 +24,37 @@ const ENGAGED = new Set([
   "soft_no",
   "hard_no",
 ]);
+
+async function loadLeadSegmentHints(
+  organizationId: string,
+  leadIds: string[],
+): Promise<Map<string, { industry: string; seniority: string }>> {
+  const out = new Map<string, { industry: string; seniority: string }>();
+  const db = getAdminDb();
+  if (!db || leadIds.length === 0) return out;
+  // Firestore getAll is capped; batch in chunks of 50.
+  for (let i = 0; i < leadIds.length; i += 50) {
+    const chunk = leadIds.slice(i, i + 50);
+    const refs = chunk.map((id) => db.collection(COLLECTIONS.leads).doc(id));
+    const snaps = await db.getAll(...refs);
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
+      const data = snap.data() as Record<string, unknown>;
+      if (String(data.organizationId ?? "") !== organizationId) continue;
+      const industry =
+        typeof data.companyIndustry === "string" && data.companyIndustry.trim()
+          ? data.companyIndustry.trim().toLowerCase()
+          : "unknown";
+      const title =
+        typeof data.contactTitle === "string" ? data.contactTitle : undefined;
+      out.set(snap.id, {
+        industry,
+        seniority: seniorityBracketFromTitle(title),
+      });
+    }
+  }
+  return out;
+}
 
 export async function refreshOutreachConfigScorecard(input: {
   organizationId: string;
@@ -123,15 +161,32 @@ export async function refreshOutreachConfigScorecard(input: {
     let spamComplaintCount = 0;
     let potentialScoreSum = 0;
     const mailboxCounts = new Map<string, number>();
+    const bySeniority = new Map();
+    const byIndustry = new Map();
+    const leadHints = await loadLeadSegmentHints(organizationId, leadIds);
+
+    const hintFor = (leadId: string | null | undefined) =>
+      leadId && leadHints.has(leadId)
+        ? leadHints.get(leadId)!
+        : { industry: "unknown", seniority: "unknown" };
 
     for (const ev of deliveryEvents) {
+      const meta = (ev.meta ?? {}) as Record<string, unknown>;
+      // Seed probes are deliverability monitors, not experiment outcomes.
+      if (meta.seedAddress === true) continue;
+
       if (ev.type === "sent") {
         sent += 1;
         if (ev.mailboxId) {
           mailboxCounts.set(ev.mailboxId, (mailboxCounts.get(ev.mailboxId) ?? 0) + 1);
         }
+        const h = hintFor(ev.leadId);
+        bumpSegment(bySeniority, h.seniority, { sent: 1, delivered: 1 });
+        bumpSegment(byIndustry, h.industry, { sent: 1, delivered: 1 });
       }
-      if (ev.type === "bounced") bounced += 1;
+      if (ev.type === "bounced") {
+        bounced += 1;
+      }
       if (ev.type === "unsubscribed") unsubscribeCount += 1;
     }
 
@@ -150,21 +205,38 @@ export async function refreshOutreachConfigScorecard(input: {
       if (meta.classifiedBy === "fallback") continue;
       const classification = String(meta.classification ?? "");
       const score = Number(meta.potentialScore ?? 0);
-      if (POSITIVE.has(classification)) positiveReplies += 1;
-      if (ENGAGED.has(classification)) engagedReplies += 1;
+      const h = hintFor(leadId);
+      if (POSITIVE.has(classification)) {
+        positiveReplies += 1;
+        bumpSegment(bySeniority, h.seniority, { positiveReplies: 1 });
+        bumpSegment(byIndustry, h.industry, { positiveReplies: 1 });
+      }
+      if (ENGAGED.has(classification)) {
+        engagedReplies += 1;
+        bumpSegment(bySeniority, h.seniority, { engagedReplies: 1 });
+        bumpSegment(byIndustry, h.industry, { engagedReplies: 1 });
+      }
       if (classification === "hard_no") hardNoCount += 1;
       if (classification === "unsubscribe_request") unsubscribeCount += 1;
       if (Number.isFinite(score)) potentialScoreSum += score;
     }
 
-    const suppressions = await tx.emailSuppression.count({
+    const unsubSuppressions = await tx.emailSuppression.count({
       where: {
         organizationId,
-        reason: { in: ["unsubscribe", "complaint"] },
+        reason: "unsubscribe",
         ...(leadIds.length > 0 ? { leadId: { in: leadIds } } : {}),
       },
     });
-    unsubscribeCount = Math.max(unsubscribeCount, suppressions);
+    const complaintSuppressions = await tx.emailSuppression.count({
+      where: {
+        organizationId,
+        reason: "complaint",
+        ...(leadIds.length > 0 ? { leadId: { in: leadIds } } : {}),
+      },
+    });
+    unsubscribeCount = Math.max(unsubscribeCount, unsubSuppressions);
+    spamComplaintCount = complaintSuppressions;
 
     const generations = await tx.aiGeneration.findMany({
       where: { organizationId, configId },
@@ -262,7 +334,7 @@ export async function refreshOutreachConfigScorecard(input: {
         offlinePassRate,
         offlineHallucination: latestEval?.hallucinationCount ?? null,
         judgeWinRate,
-        segments: {} as Prisma.InputJsonValue,
+        segments: segmentsToJson({ bySeniority, byIndustry }) as Prisma.InputJsonValue,
         posteriorAlpha: posterior.alpha,
         posteriorBeta: posterior.beta,
         confoundWarnings: confoundWarnings as unknown as Prisma.InputJsonValue,
@@ -295,6 +367,7 @@ export async function refreshOutreachConfigScorecard(input: {
         offlinePassRate,
         offlineHallucination: latestEval?.hallucinationCount ?? null,
         judgeWinRate,
+        segments: segmentsToJson({ bySeniority, byIndustry }) as Prisma.InputJsonValue,
         posteriorAlpha: posterior.alpha,
         posteriorBeta: posterior.beta,
         confoundWarnings: confoundWarnings as unknown as Prisma.InputJsonValue,

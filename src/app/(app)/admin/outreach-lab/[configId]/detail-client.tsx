@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { PageBody, PageHeader } from "@/components/common/page-header";
 import { CreateVariantDialog } from "@/components/admin/outreach-lab/create-variant-dialog";
 import { PromoteSheet } from "@/components/admin/outreach-lab/promote-sheet";
 import { ConfigDiff } from "@/components/admin/outreach-lab/config-diff";
@@ -123,20 +124,27 @@ export function OutreachLabDetailClient() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading config…
-      </div>
+      <>
+        <PageHeader title="Config" />
+        <PageBody>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading config…
+          </div>
+        </PageBody>
+      </>
     );
   }
 
   if (!data) {
     return (
-      <div className="p-6 space-y-3">
-        <p className="text-sm text-muted-foreground">Config not found.</p>
-        <Link href="/admin/outreach-lab" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-          Back
-        </Link>
-      </div>
+      <>
+        <PageHeader title="Config" description="Config not found." />
+        <PageBody>
+          <Link href="/admin/outreach-lab" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+            Back
+          </Link>
+        </PageBody>
+      </>
     );
   }
 
@@ -144,42 +152,41 @@ export function OutreachLabDetailClient() {
   const sc = scorecard ?? {};
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <Link
-            href="/admin/outreach-lab"
-            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Outreach Lab
-          </Link>
-          <h1 className="text-xl font-semibold">{config.label}</h1>
-          <div className="flex flex-wrap gap-1">
-            {zones.map((z) => (
-              <Badge key={z}>{z}</Badge>
-            ))}
-            <Badge variant="secondary">{config.status}</Badge>
+    <>
+      <PageHeader
+        title={config.label}
+        description={`${config.id} · ${config.provider}/${config.model}`}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => void runEval()}>
+              Run eval
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setForkOpen(true)}>
+              Create variant
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setPromoteZone("canary")}>
+              → canary
+            </Button>
+            <Button size="sm" onClick={() => setPromoteZone("default")}>
+              → default
+            </Button>
           </div>
-          <p className="font-mono text-xs text-muted-foreground">
-            {config.id} · {config.provider}/{config.model}
-          </p>
+        }
+      >
+        <Link
+          href="/admin/outreach-lab"
+          className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" /> Outreach Lab
+        </Link>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {zones.map((z) => (
+            <Badge key={z}>{z}</Badge>
+          ))}
+          <Badge variant="secondary">{config.status}</Badge>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" disabled={busy} onClick={() => void runEval()}>
-            Run eval
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setForkOpen(true)}>
-            Create variant
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setPromoteZone("canary")}>
-            → canary
-          </Button>
-          <Button size="sm" onClick={() => setPromoteZone("default")}>
-            → default
-          </Button>
-        </div>
-      </div>
-
+      </PageHeader>
+      <PageBody>
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
@@ -339,6 +346,7 @@ export function OutreachLabDetailClient() {
           onPromoted={() => void load()}
         />
       )}
-    </div>
+      </PageBody>
+    </>
   );
 }

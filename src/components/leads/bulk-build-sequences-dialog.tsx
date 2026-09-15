@@ -298,6 +298,8 @@ export function BulkBuildSequencesDialog({
         items: SuggestApiItem[];
         generationId?: string;
         configId?: string;
+        experimentId?: string;
+        armId?: string;
       }
     | { ok: false; error: string }
   > {
@@ -376,6 +378,9 @@ export function BulkBuildSequencesDialog({
         generationId:
           typeof data.generationId === "string" ? data.generationId : undefined,
         configId: typeof data.configId === "string" ? data.configId : undefined,
+        experimentId:
+          typeof data.experimentId === "string" ? data.experimentId : undefined,
+        armId: typeof data.armId === "string" ? data.armId : undefined,
       };
     } catch {
       if (isDemo) {
@@ -397,7 +402,12 @@ export function BulkBuildSequencesDialog({
     planSummary: string,
     items: SuggestApiItem[],
     tplId: string,
-    provenance?: { generationId?: string; configId?: string },
+    provenance?: {
+      generationId?: string;
+      configId?: string;
+      experimentId?: string;
+      armId?: string;
+    },
   ): { ok: true; stepCount: number } | { ok: false; error: string } {
     const lead = leadsRef.current.find((l) => l.id === leadId);
     if (!lead) return { ok: false, error: "Lead not found" };
@@ -444,6 +454,8 @@ export function BulkBuildSequencesDialog({
     void recordFollowupSuggestAccept({
       generationId: provenance?.generationId,
       configId: provenance?.configId,
+      experimentId: provenance?.experimentId,
+      armId: provenance?.armId,
       planId,
       leadId: lead.id,
       steps: created.map((f, i) => ({
@@ -521,6 +533,8 @@ export function BulkBuildSequencesDialog({
         {
           generationId: "generationId" in generated ? generated.generationId : undefined,
           configId: "configId" in generated ? generated.configId : undefined,
+          experimentId: "experimentId" in generated ? generated.experimentId : undefined,
+          armId: "armId" in generated ? generated.armId : undefined,
         },
       );
       if (!activated.ok) {

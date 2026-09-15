@@ -547,6 +547,21 @@ export async function sendClaimedScheduledEmailPg(
       }
     }
 
+    try {
+      const { getOrganizationAiSettingsServer } = await import(
+        "@/lib/ai/ai-settings-server"
+      );
+      const { isSeedRecipient, seedMetaForRecipient } = await import(
+        "@/lib/ai/eval/seed-addresses"
+      );
+      const aiSettings = await getOrganizationAiSettingsServer(organizationId);
+      if (isSeedRecipient(aiSettings, row.to)) {
+        sentEventMeta = { ...sentEventMeta, ...seedMetaForRecipient(row.to) };
+      }
+    } catch {
+      /* seed tagging best-effort */
+    }
+
     void recordEmailEvent({
       organizationId,
       type: "sent",

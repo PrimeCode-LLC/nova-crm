@@ -327,8 +327,38 @@ export async function POST(req: Request) {
     : "(none - no style template selected; generate from lead context and instructions only)";
 
   try {
-    const { resolveOutreachConfig } = await import("@/lib/ai/outreach-config-server");
-    const outreachConfig = await resolveOutreachConfig(orgId, "followup_suggest", "default");
+    const { resolveOutreachConfig, getOutreachConfig } = await import(
+      "@/lib/ai/outreach-config-server"
+    );
+    const { resolveLeadExperimentAssignment } = await import(
+      "@/lib/ai/eval/experiment-resolve"
+    );
+
+    const experimentAssignment = parsed.data.leadId
+      ? await resolveLeadExperimentAssignment(orgId, parsed.data.leadId)
+      : null;
+
+    const experimentConfig = experimentAssignment
+      ? await getOutreachConfig(orgId, experimentAssignment.configId)
+      : null;
+    const resolvedDefault = experimentConfig
+      ? null
+      : await resolveOutreachConfig(orgId, "followup_suggest", "default");
+
+    const activeConfig = experimentConfig
+      ? {
+          id: experimentConfig.id,
+          systemPrompt: experimentConfig.systemPrompt,
+          zone: "default" as const,
+        }
+      : resolvedDefault
+        ? {
+            id: resolvedDefault.id,
+            systemPrompt: resolvedDefault.systemPrompt,
+            zone: resolvedDefault.zone,
+          }
+        : null;
+
     const aiResult = await runAiStructuredFeature({
       organizationId: orgId,
       userId: uid,
@@ -350,11 +380,11 @@ export async function POST(req: Request) {
       },
       schema: parsed.data.singleStep ? singleStepSuggestSchema : suggestSchema,
       leadId: parsed.data.leadId,
-      ...(outreachConfig
+      ...(activeConfig
         ? {
-            configId: outreachConfig.id,
-            zone: "default" as const,
-            systemPromptOverride: outreachConfig.systemPrompt,
+            configId: activeConfig.id,
+            zone: activeConfig.zone,
+            systemPromptOverride: activeConfig.systemPrompt,
             userPromptOverride: undefined,
           }
         : {}),
@@ -371,6 +401,9 @@ export async function POST(req: Request) {
         channelMix,
         singleStep: parsed.data.singleStep === true,
         scriptId: selectedTemplate?.id ?? null,
+        experimentId: experimentAssignment?.experimentId ?? null,
+        armId: experimentAssignment?.armId ?? null,
+        configId: activeConfig?.id ?? null,
       },
     });
     /**
@@ -385,6 +418,8 @@ export async function POST(req: Request) {
       ...normalizeSuggestResult(result),
       generationId: aiResult.generationId,
       configId: aiResult.configId,
+      experimentId: experimentAssignment?.experimentId ?? null,
+      armId: experimentAssignment?.armId ?? null,
       leadChannel: loaded.lead.channel as ChannelKey,
       sequenceMode,
       channelMix,

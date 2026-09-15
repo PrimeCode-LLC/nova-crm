@@ -5,6 +5,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { withOrganizationScope } from "@/lib/db/tenant-scope";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
+import { interleaveLeadIdsForExperiment } from "@/lib/ai/eval/experiment-shuffle";
 
 export type ExperimentArmInput = {
   id: string;
@@ -41,14 +42,7 @@ export function assignLeadsToArms(input: {
   leadIds: string[];
   arms: ExperimentArmInput[];
 }): Array<{ leadId: string; armId: string; configId: string }> {
-  const shuffled = [...input.leadIds].sort((a, b) =>
-    createHash("sha1")
-      .update(`${input.experimentId}:shuffle:${a}`)
-      .digest("hex")
-      .localeCompare(
-        createHash("sha1").update(`${input.experimentId}:shuffle:${b}`).digest("hex"),
-      ),
-  );
+  const shuffled = interleaveLeadIdsForExperiment(input.experimentId, input.leadIds);
   return shuffled.map((leadId) => {
     const armId = pickArmId(input.experimentId, leadId, input.arms);
     const arm = input.arms.find((a) => a.id === armId)!;
@@ -88,3 +82,11 @@ export async function persistAssignments(input: {
 }
 
 export const STAGE_MIN_PER_ARM = { 1: 600, 2: 1900 } as const;
+
+export {
+  resolveLeadExperimentAssignment,
+  interleaveLeadIdsForExperiment,
+  reorderByExperimentShuffle,
+} from "@/lib/ai/eval/experiment-resolve";
+export type { LeadExperimentAssignment } from "@/lib/ai/eval/experiment-resolve";
+

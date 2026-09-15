@@ -96,6 +96,14 @@ async function main() {
   const pBeat = probVariantBeatsControl(postB, postA);
 
   const clean = pBeat < 0.8 && Math.abs(aCount - bCount) < leadsN * 0.15;
+  const { setAaGateState } = await import("../src/lib/ai/eval/aa-gate-server");
+  await setAaGateState(org, {
+    clean,
+    experimentId,
+    pBeat,
+    checkedAt: new Date().toISOString(),
+    leadCount: leadsN,
+  });
   console.info({
     experimentId,
     aCount,

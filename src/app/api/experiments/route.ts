@@ -23,6 +23,8 @@ const startSchema = z.object({
   controlConfigId: z.string().min(1),
   variantConfigId: z.string().min(1),
   leadIds: z.array(z.string().min(1)).min(2).max(50_000),
+  /** Escape hatch after reviewing A/A failure — still logs an audit. */
+  skipAaGate: z.boolean().optional(),
 });
 
 export async function GET(req: Request) {
@@ -104,9 +106,63 @@ export async function POST(req: Request) {
     );
   }
 
+  const { getAaGateState, assignmentBalanceLooksClean } = await import(
+    "@/lib/ai/eval/aa-gate-server"
+  );
+  const aaGate = await getAaGateState(orgId);
+  if (!aaGate.clean && !parsed.data.skipAaGate) {
+    return NextResponse.json(
+      {
+        error:
+          "A/A gate not passed. Run `npx tsx scripts/run-aa-test.ts --org=<orgId> --config=<configId>` and ensure it reports clean before starting a live experiment. Pass skipAaGate:true only as an explicit override.",
+        aaGate,
+      },
+      { status: 409 },
+    );
+  }
+
   const experimentId = `exp-${randomUUID()}`;
   const armControl = `arm-${randomUUID()}`;
   const armVariant = `arm-${randomUUID()}`;
+
+  const assignments = assignLeadsToArms({
+    experimentId,
+    leadIds: parsed.data.leadIds,
+    arms: [
+      {
+        id: armControl,
+        allocation: 50,
+        configId: parsed.data.controlConfigId,
+        label: "control",
+        isControl: true,
+      },
+      {
+        id: armVariant,
+        allocation: 50,
+        configId: parsed.data.variantConfigId,
+        label: "variant",
+      },
+    ],
+  });
+
+  const armCounts = [
+    assignments.filter((a) => a.armId === armControl).length,
+    assignments.filter((a) => a.armId === armVariant).length,
+  ];
+  if (
+    !assignmentBalanceLooksClean({
+      armCounts,
+      totalLeads: parsed.data.leadIds.length,
+    })
+  ) {
+    return NextResponse.json(
+      {
+        error: "Assignment balance failed in-process A/A check (arm sizes diverge >15%)",
+        armCounts,
+      },
+      { status: 500 },
+    );
+  }
 
   await withOrganizationScope(orgId, async (tx) => {
     await tx.experiment.create({
@@ -146,25 +202,6 @@ export async function POST(req: Request) {
     });
   });
 
-  const assignments = assignLeadsToArms({
-    experimentId,
-    leadIds: parsed.data.leadIds,
-    arms: [
-      {
-        id: armControl,
-        allocation: 50,
-        configId: parsed.data.controlConfigId,
-        label: "control",
-        isControl: true,
-      },
-      {
-        id: armVariant,
-        allocation: 50,
-        configId: parsed.data.variantConfigId,
-        label: "variant",
-      },
-    ],
-  });
   const { upserted } = await persistAssignments({
     organizationId: orgId,
     experimentId,

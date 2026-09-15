@@ -27,6 +27,11 @@ import {
   assignBulkProspectSchedules,
   loadMailboxCapacityStates,
 } from "@/lib/email/bulk-mailbox-assign";
+import { reorderByExperimentShuffle } from "@/lib/ai/eval/experiment-shuffle";
+import {
+  buildSeedProspectStubs,
+  seedProbeCopy,
+} from "@/lib/ai/eval/seed-addresses";
 import {
   buildContactRecipientOptions,
   defaultContactRecipientEmail,
@@ -533,6 +538,7 @@ export function BulkScheduleSequencesDialog({
     let failed = 0;
     let emailsScheduled = 0;
     const successLeadIds: string[] = [];
+    const successMailboxIds: string[] = [];
     const mailboxById = new Map(selected.map((m) => [m.id, m]));
 
     type PreparedProspect = {
@@ -667,12 +673,26 @@ export function BulkScheduleSequencesDialog({
 
     const bulk = assignBulkProspectSchedules({
       states: loaded.states,
-      prospects: prepared.map((p) => ({
-        key: p.leadId,
-        steps: p.draftSteps,
-        candidateMailboxIds: p.candidateMailboxIds,
-        preferredMailboxId: p.preferPrior,
-      })),
+      prospects: (() => {
+        const mapped = prepared.map((p) => ({
+          key: p.leadId,
+          steps: p.draftSteps,
+          candidateMailboxIds: p.candidateMailboxIds,
+          preferredMailboxId: p.preferPrior,
+        }));
+        // When scheduling an experiment cohort, set sessionStorage.outreachExperimentId
+        // so mailbox round-robin interleaved across arms in one batch.
+        const experimentId =
+          typeof window !== "undefined"
+            ? sessionStorage.getItem("outreachExperimentId")?.trim() || ""
+            : "";
+        if (!experimentId) return mapped;
+        return reorderByExperimentShuffle({
+          experimentId,
+          items: mapped,
+          leadIdOf: (p) => p.key,
+        });
+      })(),
       timeZone,
       sendPolicy: organizationSendPolicy,
       orgCeiling,
@@ -810,6 +830,7 @@ export function BulkScheduleSequencesDialog({
       success += 1;
       emailsScheduled += okCount;
       successLeadIds.push(leadId);
+      successMailboxIds.push(assigned.mailboxId);
     }
 
     if (mode === "preview") {
@@ -848,6 +869,57 @@ export function BulkScheduleSequencesDialog({
       setPreviewReady(true);
       setPhase("preview");
       return;
+    }
+
+    // Inject deliverability seed probes into the same mailbox mix as this batch.
+    if (!isDemo && success > 0 && successMailboxIds.length > 0) {
+      try {
+        const settingsRes = await fetch("/api/ai/settings");
+        if (settingsRes.ok) {
+          const data = (await settingsRes.json()) as {
+            settings?: { seedAddresses?: string[] };
+          };
+          const stubs = buildSeedProspectStubs(data.settings);
+          const mailboxPool = [...new Set(successMailboxIds)];
+          if (stubs.length > 0 && mailboxPool.length > 0) {
+            const { subject, text } = seedProbeCopy();
+            const probeAt = new Date(Date.now() + 90_000).toISOString();
+            let seedOk = 0;
+            for (let i = 0; i < stubs.length; i++) {
+              const seed = stubs[i]!;
+              const mailboxId = mailboxPool[i % mailboxPool.length]!;
+              const mailbox = mailboxById.get(mailboxId);
+              if (!mailbox?.emailAddress?.trim()) continue;
+              const owner = mailbox.dataOwnerUid?.trim();
+              const url = owner
+                ? `/api/email/scheduled?forUser=${encodeURIComponent(owner)}`
+                : "/api/email/scheduled";
+              const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  to: seed.to,
+                  mailboxId,
+                  from: mailbox.emailAddress.trim(),
+                  displayName: mailbox.displayName,
+                  subject,
+                  text,
+                  html: `<p>${text.replace(/</g, "&lt;")}</p>`,
+                  scheduledAt: probeAt,
+                }),
+              });
+              if (res.ok) seedOk += 1;
+            }
+            if (seedOk > 0) {
+              toast.message(
+                `Also queued ${seedOk} deliverability seed probe${seedOk === 1 ? "" : "s"}`,
+              );
+            }
+          }
+        }
+      } catch {
+        /* seed injection best-effort */
+      }
     }
 
     setPhase("done");
