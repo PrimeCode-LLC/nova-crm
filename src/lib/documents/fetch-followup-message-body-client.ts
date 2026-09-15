@@ -37,7 +37,9 @@ export async function fetchFollowupMessageBodyClient(
 /** Returns a followup with `messageBody` filled from Firestore when it was omitted from live state. */
 export async function hydrateFollowupMessageBody(f: Followup): Promise<Followup> {
   if (f.messageBody?.trim()) return f;
-  if (!f.hasMessageBody) return f;
+  // Prefer hasMessageBody; also try when we only have a subject (heals stale live rows
+  // that lost the flag after list projection stripped the body).
+  if (!f.hasMessageBody && !f.emailSubject?.trim()) return f;
   const body = await fetchFollowupMessageBodyClient(f.id);
   if (body == null) return { ...f, hasMessageBody: false };
   return { ...f, messageBody: body, hasMessageBody: undefined };

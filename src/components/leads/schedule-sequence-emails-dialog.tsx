@@ -220,9 +220,9 @@ export function ScheduleSequenceEmailsDialog({
     [followups, lead.channel],
   );
 
-  // Defaults are seeded once per open. Workspace polls change `planFollowups` /
-  // `schedulable` identity, which would otherwise re-seed and discard the dates
-  // the user just picked.
+  // Seed once per open. Lock immediately — waiting until hydrate finishes let
+  // workspace polls change `schedulable` mid-flight, cancel the run, and re-seed
+  // with fewer steps (emails appearing to vanish one by one).
   const seededRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -231,50 +231,63 @@ export function ScheduleSequenceEmailsDialog({
       return;
     }
     if (seededRef.current) return;
+    seededRef.current = true;
+    const toHydrate = schedulable;
+    const planSnapshot = planFollowups;
+    const recipientSnapshot = recipientOptions;
+    const mailboxSnapshot = mailboxOptions;
+    const activeMb = activeMailboxId;
+    const priorMailboxId = priorSender?.mailboxId;
+    const tz = timezone;
+    const scheduleTz = scheduleTimezone;
+    const windowStart = sendWindow.startHour;
+    const windowEnd = sendWindow.endHour;
+    const sendPolicy = organizationSendPolicy;
+    const waitUntil = lead.followUpAfterDate;
+    const orgId = organizationId;
+    const uid = currentUserId;
     let cancelled = false;
     void (async () => {
-      const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
+      const prefs = loadLastUsedMailboxPrefs(orgId, uid);
       const priorId =
-        priorSender?.mailboxId &&
-        mailboxOptions.some((m) => m.id === priorSender.mailboxId)
-          ? priorSender.mailboxId
+        priorMailboxId && mailboxSnapshot.some((m) => m.id === priorMailboxId)
+          ? priorMailboxId
           : "";
       const defaultId =
         priorId ||
         resolveDefaultScheduleMailboxId({
-          mailboxIds: mailboxOptions.map((mb) => mb.id),
+          mailboxIds: mailboxSnapshot.map((mb) => mb.id),
           lastUsedId: prefs.lastMailboxId,
-          activeMailboxId,
+          activeMailboxId: activeMb,
         });
-      const hydrated = await hydrateFollowupsMessageBodies(schedulable);
+      const hydrated = await hydrateFollowupsMessageBodies(toHydrate);
       if (cancelled) return;
       setMailboxId(defaultId);
       const priorTo = resolvePriorSequenceRecipient({
-        planFollowups,
-        recipientEmails: recipientOptions.map((o) => o.email),
+        planFollowups: planSnapshot,
+        recipientEmails: recipientSnapshot.map((o) => o.email),
       });
-      setTo(priorTo || defaultContactRecipientEmail(recipientOptions));
+      setTo(priorTo || defaultContactRecipientEmail(recipientSnapshot));
       setIncludeSignature(true);
       setIncludeFooter(true);
       setContinuityMode("continue");
       setSteps(
         hydrated.map((f, index) => {
-          const waitDate = lead.followUpAfterDate;
-          const waitActive = hasActiveFollowUpAfterDate(waitDate, timezone);
+          const waitActive = hasActiveFollowUpAfterDate(waitUntil, tz);
           const dueDay = f.dueAt?.slice(0, 10);
           let preferIso = f.dueAt;
-          if (waitActive && waitDate && (!dueDay || dueDay < waitDate)) {
+          if (waitActive && waitUntil && (!dueDay || dueDay < waitUntil)) {
             // Old due dates landed before they return — re-lay the cadence from that day.
             preferIso = isoFromDateInput(
               dateInputForSequenceStep(index, {
                 includeInitial: true,
                 from: sequenceCadenceStartFromWaitUntil({
-                  followUpAfterDate: waitDate,
-                  timeZone: timezone,
+                  followUpAfterDate: waitUntil,
+                  timeZone: tz,
                 }),
-                timeZone: timezone,
+                timeZone: tz,
               }),
-              timezone,
+              tz,
             );
           }
           return {
@@ -283,11 +296,11 @@ export function ScheduleSequenceEmailsDialog({
             subject: f.emailSubject?.trim() || f.title,
             scheduledAt: defaultAudienceScheduleDatetimeLocal({
               preferIso,
-              timeZone: scheduleTimezone,
-              sendWindowStartHour: sendWindow.startHour,
-              sendWindowEndHour: sendWindow.endHour,
+              timeZone: scheduleTz,
+              sendWindowStartHour: windowStart,
+              sendWindowEndHour: windowEnd,
               spreadKey: f.id,
-              sendPolicy: organizationSendPolicy,
+              sendPolicy,
             }),
             body: f.messageBody ?? "",
             included: true,
@@ -295,29 +308,14 @@ export function ScheduleSequenceEmailsDialog({
         }),
       );
       setSubmitting(false);
-      seededRef.current = true;
     })();
     return () => {
       cancelled = true;
     };
-  }, [
-    open,
-    recipientOptions,
-    mailboxOptions,
-    activeMailboxId,
-    schedulable,
-    scheduleTimezone,
-    sendWindow.startHour,
-    sendWindow.endHour,
-    organizationId,
-    currentUserId,
-    hasPriorSent,
-    priorSender?.mailboxId,
-    planFollowups,
-    organizationSendPolicy,
-    timezone,
-    lead.followUpAfterDate,
-  ]);
+    // Intentionally seed only when `open` flips. Poll-driven identity churn on
+    // schedulable / planFollowups must not restart hydrate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+  }, [open]);
 
   React.useEffect(() => {
     if (!open || !mailboxId) {

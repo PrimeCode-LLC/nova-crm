@@ -138,12 +138,33 @@ export function matchesFollowupChannelFilter(
   return followupQueueKind(f, leadChannel) === filter;
 }
 
+/**
+ * List polls omit `messageBody` and set `hasMessageBody` instead
+ * (`projectWorkspaceListPayload`). Live mappers must honor that flag or
+ * email steps look empty after the first workspace refresh.
+ */
+export function resolveFollowupHasMessageBody(raw: {
+  messageBody?: unknown;
+  hasMessageBody?: unknown;
+}): boolean {
+  if (raw.hasMessageBody === true) return true;
+  return typeof raw.messageBody === "string" && Boolean(raw.messageBody.trim());
+}
+
 /** True when this step can be auto-scheduled as outbound email. */
 export function canAutoScheduleFollowupEmail(
   f: Followup,
   leadChannel: ChannelKey,
 ): boolean {
-  if (!f.messageBody?.trim() && !f.hasMessageBody) return false;
+  // Prefer body / hasMessageBody. emailSubject covers live rows where list
+  // projection omitted the body and the hasMessageBody flag was dropped.
+  if (
+    !f.messageBody?.trim() &&
+    !f.hasMessageBody &&
+    !f.emailSubject?.trim()
+  ) {
+    return false;
+  }
   if (f.scheduledEmailId || f.pausedAt || f.completedAt) return false;
   return isFollowupEmailChannel(f, leadChannel);
 }

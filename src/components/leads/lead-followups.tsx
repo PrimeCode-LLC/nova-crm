@@ -52,6 +52,7 @@ import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,
   getPausedFollowupPlanForLead,
+  isFollowupEmailChannel,
   isSupersededFollowup,
   mergeFollowupPlans,
   retirableFollowupsForPlan,
@@ -201,24 +202,27 @@ function FollowupRow({
   const isScheduled = Boolean(f.scheduledEmailId && f.emailScheduledAt);
   const isFailed = f.deliveryStatus === "failed";
   const isRetrying = f.deliveryStatus === "needs_retry";
-  const channelSupportsEmail = canAutoScheduleFollowupEmail(
-    { ...f, scheduledEmailId: undefined, completedAt: undefined, pausedAt: undefined },
-    leadChannel,
-  );
+  const channelSupportsEmail = isFollowupEmailChannel(f, leadChannel);
+  const bodyText = hydratedBody ?? f.messageBody;
+  // List polls omit messageBody; hasMessageBody should remain. emailSubject is a
+  // fallback so rows stay expandable when that flag was dropped from live state.
+  const hasBody =
+    Boolean(bodyText?.trim()) ||
+    Boolean(f.hasMessageBody) ||
+    Boolean(f.emailSubject?.trim() && channelSupportsEmail);
   const canScheduleNow = canAutoScheduleFollowupEmail(f, leadChannel);
   const canRetry =
     canMutate &&
     Boolean(f.scheduledEmailId) &&
     (isFailed || isRetrying);
-  const bodyText = hydratedBody ?? f.messageBody;
-  const hasBody = Boolean(bodyText?.trim()) || Boolean(f.hasMessageBody);
 
   React.useEffect(() => {
     setHydratedBody(f.messageBody);
   }, [f.id, f.messageBody]);
 
   React.useEffect(() => {
-    if (!expanded || bodyText?.trim() || !f.hasMessageBody) return;
+    if (!expanded || bodyText?.trim()) return;
+    if (!f.hasMessageBody && !f.emailSubject?.trim()) return;
     let cancelled = false;
     void hydrateFollowupMessageBody(f).then((next) => {
       if (!cancelled && next.messageBody) setHydratedBody(next.messageBody);
@@ -361,10 +365,24 @@ function FollowupRow({
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              aria-label={expanded ? "Collapse message" : "Expand message"}
+              aria-label={expanded ? "Hide email body" : "View email body"}
+              title={expanded ? "Hide email body" : "View email body"}
               onClick={() => setExpanded((e) => !e)}
             >
               {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </Button>
+          ) : null}
+          {canMutate && canScheduleNow && !isFailed && !isRetrying ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              aria-label="Schedule this email"
+              title="Schedule this email"
+              onClick={onSchedule}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
             </Button>
           ) : null}
           {canMutate ? (
@@ -374,7 +392,8 @@ function FollowupRow({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 text-muted-foreground"
-                aria-label="Edit followup"
+                aria-label={hasBody ? "View / edit email" : "Edit followup"}
+                title={hasBody ? "View / edit email" : "Edit followup"}
                 onClick={onEdit}
               >
                 <Pencil className="h-3.5 w-3.5" />
@@ -439,7 +458,7 @@ function FollowupRow({
           </div>
         </div>
       )}
-      {expanded && !bodyText && f.hasMessageBody ? (
+          {expanded && !bodyText && (f.hasMessageBody || f.emailSubject) ? (
         <p className="mt-2 ml-9 text-xs text-muted-foreground">Loading message…</p>
       ) : null}
       {(isFailed || isRetrying) && !expanded && canRetry ? (

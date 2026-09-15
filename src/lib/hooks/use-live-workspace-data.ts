@@ -43,6 +43,7 @@ import type {
 import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
 import { isPostgresReadCrmV1Enabled } from "@/lib/db/postgres-read-crm-flags";
 import { isPostgresReadLeadsV1Enabled } from "@/lib/db/postgres-read-leads-flags";
+import { resolveFollowupHasMessageBody } from "@/lib/followup-plans";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import type { WorkspaceListenerGroup } from "@/lib/workspace-listener-groups";
 import {
@@ -314,8 +315,7 @@ function asNote(id: string, raw: Record<string, unknown>): Note {
 }
 
 function asFollowup(id: string, raw: Record<string, unknown>): Followup {
-  const rawBody = typeof raw.messageBody === "string" ? raw.messageBody : undefined;
-  const hasMessageBody = Boolean(rawBody?.trim());
+  const hasMessageBody = resolveFollowupHasMessageBody(raw);
   return {
     id,
     leadId: optionalNonEmptyString(raw.leadId),

@@ -166,9 +166,8 @@ export function ScheduleFollowupEmailDialog({
   );
   const timezoneLabel = formatTimezoneDisplayLabel(scheduleTimezone);
 
-  // Defaults are seeded once per open. The `followup` prop gets a new identity on
-  // every workspace poll, which would otherwise re-seed and discard the send time
-  // the user just picked.
+  // Seed once per open. Lock before hydrate — followup identity churn from
+  // workspace polls must not cancel and re-seed mid-flight.
   const seededRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -177,13 +176,15 @@ export function ScheduleFollowupEmailDialog({
       return;
     }
     if (seededRef.current) return;
+    seededRef.current = true;
+    const followupSnapshot = followup;
     let cancelled = false;
     void (async () => {
       const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
       const rememberedMailboxId =
-        followup.mailboxId &&
-        mailboxOptions.some((m) => m.id === followup.mailboxId)
-          ? followup.mailboxId
+        followupSnapshot.mailboxId &&
+        mailboxOptions.some((m) => m.id === followupSnapshot.mailboxId)
+          ? followupSnapshot.mailboxId
           : "";
       const defaultId =
         rememberedMailboxId ||
@@ -192,7 +193,7 @@ export function ScheduleFollowupEmailDialog({
           lastUsedId: prefs.lastMailboxId,
           activeMailboxId,
         });
-      const hydrated = await hydrateFollowupMessageBody(followup);
+      const hydrated = await hydrateFollowupMessageBody(followupSnapshot);
       if (cancelled) return;
       setMailboxId(defaultId);
       const rememberedTo = followup.toEmail?.trim();
