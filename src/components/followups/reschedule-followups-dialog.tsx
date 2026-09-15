@@ -64,8 +64,17 @@ export function RescheduleFollowupsDialog({
   const [dueDate, setDueDate] = React.useState(defaults.dueDate);
   const [dueTime, setDueTime] = React.useState(defaults.dueTime);
 
+  // Seed once per open — a workspace refresh that changes `referenceDueAt` must not
+  // reset the preset / custom date the user already picked.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     setPreset("tomorrow9");
     const next = defaultCustomDueInputs(timeZone, referenceDueAt);
     setDueDate(next.dueDate);

@@ -152,86 +152,96 @@ async function syncCrmEntity(
 ): Promise<void> {
   const entity = crmEntityFromCollection(collectionRoot);
   if (!entity || !isDatabaseConfigured()) return;
+  await withRlsBypass((tx) =>
+    syncCrmEntityInTx(tx, entity, docId, payload, deleteOnly),
+  );
+}
 
+async function syncCrmEntityInTx(
+  tx: TenantTx,
+  entity: CrmEntity,
+  docId: string,
+  payload: Record<string, unknown>,
+  deleteOnly = false,
+): Promise<void> {
   const orgId =
     typeof payload.organizationId === "string" ? payload.organizationId : null;
 
-  await withRlsBypass(async (tx) => {
-    if (deleteOnly) {
-      switch (entity) {
-        case "account":
-          await tx.account.deleteMany({ where: { id: docId } });
-          break;
-        case "contact":
-          await tx.contact.deleteMany({ where: { id: docId } });
-          break;
-        case "lead":
-          await tx.lead.deleteMany({ where: { id: docId } });
-          break;
-        case "deal":
-          await tx.deal.deleteMany({ where: { id: docId } });
-          break;
-      }
-      if (orgId && (entity === "lead" || entity === "deal")) {
-        scheduleOrgDashboardSummaryRefresh(orgId);
-      }
-      return;
-    }
-
-    const data = { ...payload, organizationId: orgId ?? payload.organizationId } as CrmFirestoreDoc;
+  if (deleteOnly) {
     switch (entity) {
-      case "account": {
-        const row = accountRowFromFirestore(docId, data);
-        await tx.account.upsert({
-          where: { id: docId },
-          create: row,
-          update: { ...row, id: undefined } as Prisma.AccountUncheckedUpdateInput,
-        });
+      case "account":
+        await tx.account.deleteMany({ where: { id: docId } });
         break;
-      }
-      case "contact": {
-        const row = contactRowFromFirestore(docId, data);
-        await tx.contact.upsert({
-          where: { id: docId },
-          create: row,
-          update: { ...row, id: undefined } as Prisma.ContactUncheckedUpdateInput,
-        });
+      case "contact":
+        await tx.contact.deleteMany({ where: { id: docId } });
         break;
-      }
-      case "lead": {
-        const row = leadRowFromFirestore(docId, data);
-        await tx.lead.upsert({
-          where: { id: docId },
-          create: row,
-          update: { ...row, id: undefined } as Prisma.LeadUncheckedUpdateInput,
-        });
+      case "lead":
+        await tx.lead.deleteMany({ where: { id: docId } });
         break;
-      }
-      case "deal": {
-        const row = dealRowFromFirestore(docId, data);
-        await tx.deal.upsert({
-          where: { id: docId },
-          create: row,
-          update: { ...row, id: undefined } as Prisma.DealUncheckedUpdateInput,
-        });
+      case "deal":
+        await tx.deal.deleteMany({ where: { id: docId } });
         break;
-      }
     }
     if (orgId && (entity === "lead" || entity === "deal")) {
       scheduleOrgDashboardSummaryRefresh(orgId);
     }
-  });
+    return;
+  }
+
+  const data = { ...payload, organizationId: orgId ?? payload.organizationId } as CrmFirestoreDoc;
+  switch (entity) {
+    case "account": {
+      const row = accountRowFromFirestore(docId, data);
+      await tx.account.upsert({
+        where: { id: docId },
+        create: row,
+        update: { ...row, id: undefined } as Prisma.AccountUncheckedUpdateInput,
+      });
+      break;
+    }
+    case "contact": {
+      const row = contactRowFromFirestore(docId, data);
+      await tx.contact.upsert({
+        where: { id: docId },
+        create: row,
+        update: { ...row, id: undefined } as Prisma.ContactUncheckedUpdateInput,
+      });
+      break;
+    }
+    case "lead": {
+      const row = leadRowFromFirestore(docId, data);
+      await tx.lead.upsert({
+        where: { id: docId },
+        create: row,
+        update: { ...row, id: undefined } as Prisma.LeadUncheckedUpdateInput,
+      });
+      break;
+    }
+    case "deal": {
+      const row = dealRowFromFirestore(docId, data);
+      await tx.deal.upsert({
+        where: { id: docId },
+        create: row,
+        update: { ...row, id: undefined } as Prisma.DealUncheckedUpdateInput,
+      });
+      break;
+    }
+  }
+  if (orgId && (entity === "lead" || entity === "deal")) {
+    scheduleOrgDashboardSummaryRefresh(orgId);
+  }
 }
 
-export async function getDocument(path: string): Promise<StoredDoc | null> {
-  if (!isDatabaseConfigured()) return null;
-  const parsed = parsePath(path);
-
+async function readDocumentInTx(
+  tx: TenantTx,
+  path: string,
+  parsed: ReturnType<typeof parsePath>,
+): Promise<StoredDoc | null> {
   // CRM entities: prefer Prisma tables
   const crmEntity = crmEntityFromCollection(parsed.collectionRoot);
   if (crmEntity && parsed.segments.length === 2) {
     const docId = parsed.segments[1]!;
-    const row = await withRlsBypass(async (tx) => {
+    const row = await (async () => {
       switch (crmEntity) {
         case "account":
           return tx.account.findUnique({ where: { id: docId } });
@@ -242,7 +252,7 @@ export async function getDocument(path: string): Promise<StoredDoc | null> {
         case "deal":
           return tx.deal.findUnique({ where: { id: docId } });
       }
-    });
+    })();
     if (row) {
       const payload = deserializePayload({
         ...(row.payload as Record<string, unknown>),
@@ -260,9 +270,7 @@ export async function getDocument(path: string): Promise<StoredDoc | null> {
     }
   }
 
-  const row = await withRlsBypass((tx) =>
-    tx.pgDocument.findUnique({ where: { path } }),
-  );
+  const row = await tx.pgDocument.findUnique({ where: { path } });
   if (!row) return null;
   return {
     path: row.path,
@@ -272,6 +280,74 @@ export async function getDocument(path: string): Promise<StoredDoc | null> {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+export async function getDocument(path: string): Promise<StoredDoc | null> {
+  if (!isDatabaseConfigured()) return null;
+  const parsed = parsePath(path);
+  return withRlsBypass((tx) => readDocumentInTx(tx, path, parsed));
+}
+
+/**
+ * Serialize read-modify-write on one document path.
+ *
+ * `updateDocument` and `setDocument(merge)` rewrite the whole JSONB payload, so
+ * two concurrent patches to the same doc would each read the pre-patch payload
+ * and the last writer would silently drop the other's fields. The UI does issue
+ * concurrent patches (e.g. reschedule = clear email schedule + set dueAt), which
+ * showed up as a followup snapping back to its old due date.
+ */
+async function lockDocumentPath(tx: TenantTx, path: string): Promise<void> {
+  const [high, low] = documentLockKey(path);
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${high}::int4, ${low}::int4)`;
+}
+
+/** Two independent 32-bit hashes of the path for pg_advisory_xact_lock(int4, int4). */
+function documentLockKey(path: string): [number, number] {
+  let high = 0x811c9dc5;
+  let low = 0x01000193;
+  for (let i = 0; i < path.length; i += 1) {
+    const code = path.charCodeAt(i);
+    high = Math.imul(high ^ code, 0x01000193) | 0;
+    low = Math.imul(low ^ code, 0x85ebca6b) | 0;
+  }
+  return [high, low];
+}
+
+async function writeDocumentInTx(
+  tx: TenantTx,
+  path: string,
+  parsed: ReturnType<typeof parsePath>,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const organizationId = extractOrganizationId(
+    parsed.collectionRoot,
+    parsed.segments,
+    payload,
+  );
+
+  const crmEntity = crmEntityFromCollection(parsed.collectionRoot);
+  if (crmEntity && parsed.segments.length === 2) {
+    await syncCrmEntityInTx(tx, crmEntity, parsed.segments[1]!, payload);
+  }
+
+  const now = new Date();
+  await tx.pgDocument.upsert({
+    where: { path },
+    create: {
+      path,
+      organizationId,
+      collectionRoot: parsed.collectionRoot,
+      payload: payload as Prisma.InputJsonValue,
+      createdAt: now,
+      updatedAt: now,
+    },
+    update: {
+      organizationId,
+      payload: payload as Prisma.InputJsonValue,
+      updatedAt: now,
+    },
+  });
 }
 
 export async function setDocument(
@@ -286,45 +362,17 @@ export async function setDocument(
   const resolved = resolveWriteData(data);
   const serialized = serializePayloadValue(resolved) as Record<string, unknown>;
 
-  let payload: Record<string, unknown>;
-  if (merge) {
-    const existing = await getDocument(path);
-    payload = existing
+  await withRlsBypass(async (tx) => {
+    if (!merge) {
+      await writeDocumentInTx(tx, path, parsed, serialized);
+      return;
+    }
+    await lockDocumentPath(tx, path);
+    const existing = await readDocumentInTx(tx, path, parsed);
+    const payload = existing
       ? { ...existing.payload, ...serialized }
       : serialized;
-  } else {
-    payload = serialized;
-  }
-
-  const organizationId = extractOrganizationId(
-    parsed.collectionRoot,
-    parsed.segments,
-    payload,
-  );
-
-  const crmEntity = crmEntityFromCollection(parsed.collectionRoot);
-  if (crmEntity && parsed.segments.length === 2) {
-    await syncCrmEntity(parsed.collectionRoot, parsed.segments[1]!, payload);
-  }
-
-  const now = new Date();
-  await withRlsBypass(async (tx) => {
-    await tx.pgDocument.upsert({
-      where: { path },
-      create: {
-        path,
-        organizationId,
-        collectionRoot: parsed.collectionRoot,
-        payload: payload as Prisma.InputJsonValue,
-        createdAt: now,
-        updatedAt: now,
-      },
-      update: {
-        organizationId,
-        payload: payload as Prisma.InputJsonValue,
-        updatedAt: now,
-      },
-    });
+    await writeDocumentInTx(tx, path, parsed, payload);
   });
 }
 
@@ -332,15 +380,20 @@ export async function updateDocument(
   path: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
-  const existing = await getDocument(path);
-  if (!existing) {
+  if (!isDatabaseConfigured()) {
+    throw new Error("DATABASE_URL is not configured");
+  }
+  const parsed = parsePath(path);
+
+  await withRlsBypass(async (tx) => {
+    await lockDocumentPath(tx, path);
+    const existing = await readDocumentInTx(tx, path, parsed);
     // Cutover-safe: clients historically called Firestore update() after local
     // creates. Upsert so missing pg_documents rows do not 500 the live UI.
-    await setDocument(path, patch, true);
-    return;
-  }
-  const merged = applyFieldValues(existing.payload, patch);
-  await setDocument(path, merged, false);
+    const merged = applyFieldValues(existing?.payload ?? {}, patch);
+    const payload = serializePayloadValue(merged) as Record<string, unknown>;
+    await writeDocumentInTx(tx, path, parsed, payload);
+  });
 }
 
 export async function deleteDocument(path: string): Promise<void> {

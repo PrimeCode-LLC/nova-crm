@@ -220,8 +220,17 @@ export function ScheduleSequenceEmailsDialog({
     [followups, lead.channel],
   );
 
+  // Defaults are seeded once per open. Workspace polls change `planFollowups` /
+  // `schedulable` identity, which would otherwise re-seed and discard the dates
+  // the user just picked.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
     let cancelled = false;
     void (async () => {
       const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
@@ -286,6 +295,7 @@ export function ScheduleSequenceEmailsDialog({
         }),
       );
       setSubmitting(false);
+      seededRef.current = true;
     })();
     return () => {
       cancelled = true;
