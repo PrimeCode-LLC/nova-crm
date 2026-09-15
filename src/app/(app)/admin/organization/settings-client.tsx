@@ -58,6 +58,13 @@ export function OrganizationSettingsClient({
   const [joinConfigured, setJoinConfigured] = React.useState(false);
   const [joinUrl, setJoinUrl] = React.useState<string | null>(null);
   const [joinBusy, setJoinBusy] = React.useState(false);
+  // Skip re-seed while the user is editing; reset when org identity changes.
+  const dirtyRef = React.useRef(false);
+
+  React.useEffect(() => {
+    dirtyRef.current = false;
+  }, [organization?.id]);
+
   React.useEffect(() => {
     if (!canEdit || !organization) return;
     let cancelled = false;
@@ -78,6 +85,7 @@ export function OrganizationSettingsClient({
 
   React.useEffect(() => {
     if (!organization) return;
+    if (dirtyRef.current) return;
     setName(organization.name);
     setBillingEmail(organization.billingEmail);
     setTimezone(organization.timezone);
@@ -150,6 +158,7 @@ export function OrganizationSettingsClient({
       }
       toast.success("Organization settings saved.");
       clearLegacyAccountTimezone();
+      dirtyRef.current = false;
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save");
@@ -278,7 +287,10 @@ export function OrganizationSettingsClient({
                   <Input
                     id="org-name"
                     value={name}
-                    onChange={(e) => setName(e.target.value)}
+                    onChange={(e) => {
+                      dirtyRef.current = true;
+                      setName(e.target.value);
+                    }}
                     disabled={!canEdit}
                     readOnly={!canEdit}
                     autoComplete="organization"
@@ -295,7 +307,10 @@ export function OrganizationSettingsClient({
                     id="org-billing-email"
                     type="email"
                     value={billingEmail}
-                    onChange={(e) => setBillingEmail(e.target.value)}
+                    onChange={(e) => {
+                      dirtyRef.current = true;
+                      setBillingEmail(e.target.value);
+                    }}
                     disabled={!canEdit}
                     readOnly={!canEdit}
                     placeholder="billing@company.com"
@@ -310,12 +325,18 @@ export function OrganizationSettingsClient({
                   id="org-timezone"
                   label="Workspace timezone"
                   value={timezone}
-                  onChange={setTimezone}
+                  onChange={(v) => {
+                    dirtyRef.current = true;
+                    setTimezone(v);
+                  }}
                   disabled={!canEdit}
                 />
                 <OrgSendPolicyFields
                   value={sendPolicy}
-                  onChange={setSendPolicy}
+                  onChange={(v) => {
+                    dirtyRef.current = true;
+                    setSendPolicy(v);
+                  }}
                   disabled={!canEdit}
                 />
                 {canEdit && (

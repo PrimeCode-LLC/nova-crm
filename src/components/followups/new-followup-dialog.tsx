@@ -172,8 +172,16 @@ export function NewFollowupDialog({
     return rows;
   }, [leads, leadOwnerScope, leadActivityDate, ownerScopeDeps, timeZone]);
 
+  // Seed once per open — workspace poll must not wipe in-progress form fields.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     if (editFollowup) {
       React.startTransition(() => {
         setLeadId(editFollowup.leadId ?? fixedLeadId ?? "");

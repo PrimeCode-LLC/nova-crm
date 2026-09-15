@@ -71,15 +71,26 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
   const canManageChannels = canManageProspectChannels(viewer, prospect, ws.users);
   const ownerId = prospectOwnerIdOf(prospect);
 
-  const [drafts, setDrafts] = React.useState<DraftRow[]>(() =>
+  const [drafts, setDraftsState] = React.useState<DraftRow[]>(() =>
     assignmentsToDrafts(prospect.prospectChannelAssignments),
   );
   const [saving, setSaving] = React.useState(false);
   const [pushingId, setPushingId] = React.useState<string | null>(null);
+  // Skip re-seed while editing assignments; reset when prospect changes.
+  const dirtyRef = React.useRef(false);
+  const setDrafts: typeof setDraftsState = React.useCallback((update) => {
+    dirtyRef.current = true;
+    setDraftsState(update);
+  }, []);
 
   React.useEffect(() => {
+    dirtyRef.current = false;
+  }, [prospect.id]);
+
+  React.useEffect(() => {
+    if (dirtyRef.current) return;
     React.startTransition(() => {
-      setDrafts(assignmentsToDrafts(prospect.prospectChannelAssignments));
+      setDraftsState(assignmentsToDrafts(prospect.prospectChannelAssignments));
     });
   }, [prospect.id, prospect.prospectChannelAssignments, prospect.updatedAt]);
 
@@ -214,6 +225,7 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
       );
 
       toast.success("Channel assignments saved");
+      dirtyRef.current = false;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error("Could not save assignments", { description: msg });

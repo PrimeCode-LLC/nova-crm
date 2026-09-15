@@ -216,6 +216,37 @@ export async function getScheduledEmailById(input: {
   });
 }
 
+/**
+ * The row that holds `scheduled_emails_active_idem_idx` for this key, if any.
+ * Callers use it to decide whether a new schedule can supersede the active one.
+ */
+export async function findActiveScheduledEmailByIdempotencyKey(input: {
+  organizationId: string;
+  idempotencyKey: string;
+}): Promise<
+  | (ScheduledEmail & { organizationId: string; mailboxOwnerUid: string; leaseUntil?: Date | null })
+  | null
+> {
+  const key = input.idempotencyKey.trim();
+  if (!key) return null;
+  return withOrganizationScope(input.organizationId, async (tx) => {
+    const row = await tx.scheduledEmailRow.findFirst({
+      where: {
+        organizationId: input.organizationId,
+        idempotencyKey: key,
+        status: { in: ["pending", "processing"] },
+      },
+    });
+    if (!row) return null;
+    return {
+      ...rowToScheduledEmail(row as RowShape),
+      organizationId: row.organizationId,
+      mailboxOwnerUid: row.mailboxOwnerUid,
+      leaseUntil: row.leaseUntil,
+    };
+  });
+}
+
 export async function listScheduledEmailsForMemberPg(input: {
   organizationId: string;
   uid: string;
@@ -527,6 +558,33 @@ export async function claimDueBatch(input?: {
 
     const claimed: ClaimedScheduledEmail[] = [];
     for (const c of candidates) {
+      const nextAvailable = new Date(Date.now() + gapSeconds * 1000);
+      // Reserve the mailbox gap before flipping the email to processing.
+      // GREATEST + WHERE next_available_at <= now() stops two claims from
+      // both passing a join-time gap check for the same mailbox.
+      const gapOk = await tx.$queryRaw<Array<{ ok: boolean }>>`
+        INSERT INTO mailbox_send_state (
+          organization_id, mailbox_owner_uid, mailbox_id,
+          next_available_at, updated_at
+        ) VALUES (
+          ${c.organization_id}, ${c.mailbox_owner_uid}, ${c.mailbox_id},
+          ${nextAvailable}, now()
+        )
+        ON CONFLICT (organization_id, mailbox_owner_uid, mailbox_id)
+        DO UPDATE SET
+          next_available_at = GREATEST(
+            mailbox_send_state.next_available_at,
+            EXCLUDED.next_available_at
+          ),
+          updated_at = now()
+        WHERE mailbox_send_state.next_available_at <= now()
+        RETURNING true AS ok
+      `;
+      if (!gapOk[0]?.ok) {
+        // Gap still held by another claim — leave the email pending.
+        continue;
+      }
+
       const leaseId = randomUUID();
       const leaseUntil = new Date(Date.now() + leaseMs);
       const updated = await tx.$queryRaw<ClaimRawRow[]>`
@@ -544,22 +602,19 @@ export async function claimDueBatch(input?: {
           subject, message_id, sent_at, cancelled_at, cancel_reason, error,
           last_skip_reason, payload, created_at, updated_at
       `;
-      if (!updated[0]) continue;
-
-      const nextAvailable = new Date(Date.now() + gapSeconds * 1000);
-      await tx.$executeRaw`
-        INSERT INTO mailbox_send_state (
-          organization_id, mailbox_owner_uid, mailbox_id,
-          next_available_at, updated_at
-        ) VALUES (
-          ${c.organization_id}, ${c.mailbox_owner_uid}, ${c.mailbox_id},
-          ${nextAvailable}, now()
-        )
-        ON CONFLICT (organization_id, mailbox_owner_uid, mailbox_id)
-        DO UPDATE SET
-          next_available_at = EXCLUDED.next_available_at,
-          updated_at = now()
-      `;
+      if (!updated[0]) {
+        // Row was claimed elsewhere — roll the gap reservation back to now so
+        // the next tick can pick another email for this mailbox.
+        await tx.$executeRaw`
+          UPDATE mailbox_send_state
+             SET next_available_at = now(), updated_at = now()
+           WHERE organization_id = ${c.organization_id}
+             AND mailbox_owner_uid = ${c.mailbox_owner_uid}
+             AND mailbox_id = ${c.mailbox_id}
+             AND next_available_at = ${nextAvailable}
+        `;
+        continue;
+      }
 
       claimed.push(claimedFromRow(rawToRow(updated[0])));
     }
@@ -595,28 +650,23 @@ export async function markMailboxSentPg(input: {
   const nextAvailable = new Date(Date.now() + gap * 1000);
   const now = new Date();
   await withOrganizationScope(input.organizationId, async (tx) => {
-    await tx.mailboxSendState.upsert({
-      where: {
-        organizationId_mailboxOwnerUid_mailboxId: {
-          organizationId: input.organizationId,
-          mailboxOwnerUid: input.mailboxOwnerUid,
-          mailboxId: input.mailboxId,
-        },
-      },
-      create: {
-        organizationId: input.organizationId,
-        mailboxOwnerUid: input.mailboxOwnerUid,
-        mailboxId: input.mailboxId,
-        nextAvailableAt: nextAvailable,
-        lastSentAt: now,
-        updatedAt: now,
-      },
-      update: {
-        nextAvailableAt: nextAvailable,
-        lastSentAt: now,
-        updatedAt: now,
-      },
-    });
+    await tx.$executeRaw`
+      INSERT INTO mailbox_send_state (
+        organization_id, mailbox_owner_uid, mailbox_id,
+        next_available_at, last_sent_at, updated_at
+      ) VALUES (
+        ${input.organizationId}, ${input.mailboxOwnerUid}, ${input.mailboxId},
+        ${nextAvailable}, ${now}, ${now}
+      )
+      ON CONFLICT (organization_id, mailbox_owner_uid, mailbox_id)
+      DO UPDATE SET
+        next_available_at = GREATEST(
+          mailbox_send_state.next_available_at,
+          EXCLUDED.next_available_at
+        ),
+        last_sent_at = EXCLUDED.last_sent_at,
+        updated_at = EXCLUDED.updated_at
+    `;
   });
 }
 

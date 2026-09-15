@@ -300,8 +300,11 @@ export function EmailInboxSettingsCard() {
   );
   const [footerDraft, setFooterDraft] = React.useState(globalEmailFooter);
   const [footerSaving, setFooterSaving] = React.useState(false);
+  // Skip footer re-seed while the user is typing.
+  const footerDirtyRef = React.useRef(false);
 
   React.useEffect(() => {
+    if (footerDirtyRef.current) return;
     setFooterDraft(globalEmailFooter);
   }, [globalEmailFooter]);
 
@@ -310,10 +313,12 @@ export function EmailInboxSettingsCard() {
   function saveGlobalFooter() {
     if (isDemo) {
       toast.message("Email footer is not saved in demo mode.");
+      footerDirtyRef.current = false;
       setGlobalEmailFooter(footerDraft);
       return;
     }
     setFooterSaving(true);
+    footerDirtyRef.current = false;
     setGlobalEmailFooter(footerDraft);
     // Meta persist is debounced in the store; give light feedback.
     window.setTimeout(() => {
@@ -1102,7 +1107,10 @@ export function EmailInboxSettingsCard() {
                     id="global-email-footer"
                     rows={4}
                     value={footerDraft}
-                    onChange={(e) => setFooterDraft(e.target.value)}
+                    onChange={(e) => {
+                      footerDirtyRef.current = true;
+                      setFooterDraft(e.target.value);
+                    }}
                     placeholder={`Not relevant? Reply “unsubscribe,” and we will not contact you again.`}
                     className="text-xs font-mono"
                   />
@@ -1117,7 +1125,10 @@ export function EmailInboxSettingsCard() {
                           variant="ghost"
                           size="sm"
                           className="h-8 text-xs"
-                          onClick={() => setFooterDraft(globalEmailFooter)}
+                          onClick={() => {
+                            footerDirtyRef.current = false;
+                            setFooterDraft(globalEmailFooter);
+                          }}
                         >
                           Discard
                         </Button>

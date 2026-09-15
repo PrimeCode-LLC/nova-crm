@@ -144,19 +144,6 @@ function matchesFilter(
   }
 }
 
-async function syncCrmEntity(
-  collectionRoot: string,
-  docId: string,
-  payload: Record<string, unknown>,
-  deleteOnly = false,
-): Promise<void> {
-  const entity = crmEntityFromCollection(collectionRoot);
-  if (!entity || !isDatabaseConfigured()) return;
-  await withRlsBypass((tx) =>
-    syncCrmEntityInTx(tx, entity, docId, payload, deleteOnly),
-  );
-}
-
 async function syncCrmEntityInTx(
   tx: TenantTx,
   entity: CrmEntity,
@@ -350,62 +337,107 @@ async function writeDocumentInTx(
   });
 }
 
+/**
+ * Read/modify/write helpers bound to one Postgres transaction. Every path they
+ * touch is advisory-locked for the life of the transaction, so a read followed
+ * by a dependent write cannot interleave with another writer.
+ */
+export type DocumentTxHandle = {
+  read(path: string): Promise<StoredDoc | null>;
+  write(path: string, data: Record<string, unknown>, merge: boolean): Promise<void>;
+  update(path: string, patch: Record<string, unknown>): Promise<void>;
+  remove(path: string): Promise<void>;
+};
+
+/**
+ * Run document reads and writes as one atomic, serialized unit.
+ *
+ * Backs the Firestore shim's `runTransaction` / `batch`, whose callers rely on
+ * check-then-act invariants (claim a chunk, reserve an identity, bump a counter
+ * under a ceiling). Nothing commits unless `fn` resolves.
+ */
+export async function runDocumentTransaction<T>(
+  fn: (dtx: DocumentTxHandle) => Promise<T>,
+): Promise<T> {
+  if (!isDatabaseConfigured()) {
+    throw new Error("DATABASE_URL is not configured");
+  }
+  return withRlsBypass(async (tx) => {
+    const locked = new Set<string>();
+    const lockOnce = async (path: string): Promise<void> => {
+      if (locked.has(path)) return;
+      locked.add(path);
+      await lockDocumentPath(tx, path);
+    };
+
+    return fn({
+      async read(path) {
+        await lockOnce(path);
+        return readDocumentInTx(tx, path, parsePath(path));
+      },
+      async write(path, data, merge) {
+        const parsed = parsePath(path);
+        const serialized = serializePayloadValue(
+          resolveWriteData(data),
+        ) as Record<string, unknown>;
+        await lockOnce(path);
+        if (!merge) {
+          await writeDocumentInTx(tx, path, parsed, serialized);
+          return;
+        }
+        const existing = await readDocumentInTx(tx, path, parsed);
+        await writeDocumentInTx(
+          tx,
+          path,
+          parsed,
+          existing ? { ...existing.payload, ...serialized } : serialized,
+        );
+      },
+      async update(path, patch) {
+        const parsed = parsePath(path);
+        await lockOnce(path);
+        const existing = await readDocumentInTx(tx, path, parsed);
+        // Cutover-safe: clients historically called Firestore update() after local
+        // creates. Upsert so missing pg_documents rows do not 500 the live UI.
+        const merged = applyFieldValues(existing?.payload ?? {}, patch);
+        await writeDocumentInTx(
+          tx,
+          path,
+          parsed,
+          serializePayloadValue(merged) as Record<string, unknown>,
+        );
+      },
+      async remove(path) {
+        const parsed = parsePath(path);
+        await lockOnce(path);
+        const crmEntity = crmEntityFromCollection(parsed.collectionRoot);
+        if (crmEntity && parsed.segments.length === 2) {
+          await syncCrmEntityInTx(tx, crmEntity, parsed.segments[1]!, {}, true);
+        }
+        await tx.pgDocument.deleteMany({ where: { path } });
+      },
+    });
+  });
+}
+
 export async function setDocument(
   path: string,
   data: Record<string, unknown>,
   merge: boolean,
 ): Promise<void> {
-  if (!isDatabaseConfigured()) {
-    throw new Error("DATABASE_URL is not configured");
-  }
-  const parsed = parsePath(path);
-  const resolved = resolveWriteData(data);
-  const serialized = serializePayloadValue(resolved) as Record<string, unknown>;
-
-  await withRlsBypass(async (tx) => {
-    if (!merge) {
-      await writeDocumentInTx(tx, path, parsed, serialized);
-      return;
-    }
-    await lockDocumentPath(tx, path);
-    const existing = await readDocumentInTx(tx, path, parsed);
-    const payload = existing
-      ? { ...existing.payload, ...serialized }
-      : serialized;
-    await writeDocumentInTx(tx, path, parsed, payload);
-  });
+  await runDocumentTransaction((dtx) => dtx.write(path, data, merge));
 }
 
 export async function updateDocument(
   path: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
-  if (!isDatabaseConfigured()) {
-    throw new Error("DATABASE_URL is not configured");
-  }
-  const parsed = parsePath(path);
-
-  await withRlsBypass(async (tx) => {
-    await lockDocumentPath(tx, path);
-    const existing = await readDocumentInTx(tx, path, parsed);
-    // Cutover-safe: clients historically called Firestore update() after local
-    // creates. Upsert so missing pg_documents rows do not 500 the live UI.
-    const merged = applyFieldValues(existing?.payload ?? {}, patch);
-    const payload = serializePayloadValue(merged) as Record<string, unknown>;
-    await writeDocumentInTx(tx, path, parsed, payload);
-  });
+  await runDocumentTransaction((dtx) => dtx.update(path, patch));
 }
 
 export async function deleteDocument(path: string): Promise<void> {
   if (!isDatabaseConfigured()) return;
-  const parsed = parsePath(path);
-  const crmEntity = crmEntityFromCollection(parsed.collectionRoot);
-  if (crmEntity && parsed.segments.length === 2) {
-    await syncCrmEntity(parsed.collectionRoot, parsed.segments[1]!, {}, true);
-  }
-  await withRlsBypass((tx) =>
-    tx.pgDocument.deleteMany({ where: { path } }),
-  );
+  await runDocumentTransaction((dtx) => dtx.remove(path));
 }
 
 /** Delete a document and every nested path under it (`path` and `path/...`). */

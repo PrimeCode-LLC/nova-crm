@@ -203,8 +203,16 @@ export function SuggestFollowupsDialog({
   const [experimentId, setExperimentId] = React.useState<string | undefined>();
   const [armId, setArmId] = React.useState<string | undefined>();
 
+  // Seed once per open — lead.id churn while open must not reset phase/items.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     setPhase("prompt");
     /**
      * A replan after a reply always continues the conversation. Inheriting the

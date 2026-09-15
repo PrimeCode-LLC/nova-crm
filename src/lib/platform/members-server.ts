@@ -365,7 +365,13 @@ export async function upsertMemberServer(input: {
 
   const nextStatus = (payload.status as OrgMemberStatus) ?? "active";
   if (!existing.exists && nextStatus === "active") {
-    await bumpOrganizationSeatsServer(input.organizationId, 1);
+    const seat = await bumpOrganizationSeatsServer(input.organizationId, 1, {
+      enforceMax: true,
+    });
+    if (!seat.ok) {
+      await ref.delete().catch(() => null);
+      return { error: seat.error };
+    }
   }
   await mirrorMemberAfterWrite(input.organizationId, input.uid);
   return { created: !existing.exists };
@@ -395,7 +401,18 @@ export async function setMemberStatusServer(
   await ref.update(updates);
 
   if (prevStatus !== "active" && status === "active") {
-    await bumpOrganizationSeatsServer(orgId, 1);
+    const seat = await bumpOrganizationSeatsServer(orgId, 1, { enforceMax: true });
+    if (!seat.ok) {
+      // Roll the status change back so we don't leave an active member without a seat.
+      await ref.update({
+        status: prevStatus,
+        updatedAt: FieldValue.serverTimestamp(),
+        ...(prevStatus === "disabled"
+          ? { disabledAt: FieldValue.serverTimestamp() }
+          : { disabledAt: FieldValue.delete() }),
+      });
+      return { error: seat.error };
+    }
   } else if (prevStatus === "active" && status !== "active") {
     await bumpOrganizationSeatsServer(orgId, -1);
   }

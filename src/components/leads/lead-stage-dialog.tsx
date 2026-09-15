@@ -36,8 +36,17 @@ export function LeadStageDialog({
 }) {
   const [next, setNext] = React.useState<PipelineStage>(currentStage);
 
+  // Seed once per open — stage poll must not reset the user's selection.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (open) setNext(currentStage);
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
+    setNext(currentStage);
   }, [open, currentStage]);
 
   return (

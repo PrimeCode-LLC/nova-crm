@@ -126,10 +126,21 @@ export function CampaignOptionsPanel({
   const [dailyLimitDraft, setDailyLimitDraft] = React.useState(String(dailyLimit));
   const [dailyMaxLeadsDraft, setDailyMaxLeadsDraft] = React.useState(String(dailyMaxLeads));
   const [emailGapDraft, setEmailGapDraft] = React.useState(String(emailGap));
+  // Skip prop sync while the user is editing any draft field on this panel.
+  const dirtyRef = React.useRef(false);
 
-  React.useEffect(() => setDailyLimitDraft(String(dailyLimit)), [dailyLimit]);
-  React.useEffect(() => setDailyMaxLeadsDraft(String(dailyMaxLeads)), [dailyMaxLeads]);
-  React.useEffect(() => setEmailGapDraft(String(emailGap)), [emailGap]);
+  React.useEffect(() => {
+    if (dirtyRef.current) return;
+    setDailyLimitDraft(String(dailyLimit));
+  }, [dailyLimit]);
+  React.useEffect(() => {
+    if (dirtyRef.current) return;
+    setDailyMaxLeadsDraft(String(dailyMaxLeads));
+  }, [dailyMaxLeads]);
+  React.useEffect(() => {
+    if (dirtyRef.current) return;
+    setEmailGapDraft(String(emailGap));
+  }, [emailGap]);
 
   async function save(patch: CampaignOptionsPatch) {
     if (!canEdit) return;
@@ -360,14 +371,19 @@ export function CampaignOptionsPanel({
           className="w-28 tabular-nums"
           value={dailyLimitDraft}
           disabled={!canEdit || saving}
-          onChange={(e) => setDailyLimitDraft(e.target.value)}
+          onChange={(e) => {
+            dirtyRef.current = true;
+            setDailyLimitDraft(e.target.value);
+          }}
           onBlur={() => {
             const n = parseInt(dailyLimitDraft, 10);
             if (Number.isNaN(n) || n < 1) {
               toast.error("Daily limit must be at least 1");
+              dirtyRef.current = false;
               setDailyLimitDraft(String(dailyLimit));
               return;
             }
+            dirtyRef.current = false;
             if (n !== dailyLimit) void save({ daily_limit: n });
           }}
         />
@@ -431,14 +447,19 @@ export function CampaignOptionsPanel({
               className="w-28 tabular-nums"
               value={dailyMaxLeadsDraft}
               disabled={!canEdit || saving}
-              onChange={(e) => setDailyMaxLeadsDraft(e.target.value)}
+              onChange={(e) => {
+                dirtyRef.current = true;
+                setDailyMaxLeadsDraft(e.target.value);
+              }}
               onBlur={() => {
                 const n = parseInt(dailyMaxLeadsDraft, 10);
                 if (Number.isNaN(n) || n < 0) {
                   toast.error("Must be 0 or greater");
+                  dirtyRef.current = false;
                   setDailyMaxLeadsDraft(String(dailyMaxLeads));
                   return;
                 }
+                dirtyRef.current = false;
                 if (n !== dailyMaxLeads) void save({ daily_max_leads: n });
               }}
             />
@@ -454,14 +475,19 @@ export function CampaignOptionsPanel({
               className="w-28 tabular-nums"
               value={emailGapDraft}
               disabled={!canEdit || saving}
-              onChange={(e) => setEmailGapDraft(e.target.value)}
+              onChange={(e) => {
+                dirtyRef.current = true;
+                setEmailGapDraft(e.target.value);
+              }}
               onBlur={() => {
                 const n = parseInt(emailGapDraft, 10);
                 if (Number.isNaN(n) || n < 0) {
                   toast.error("Must be 0 or greater");
+                  dirtyRef.current = false;
                   setEmailGapDraft(String(emailGap));
                   return;
                 }
+                dirtyRef.current = false;
                 if (n !== emailGap) void save({ email_gap: n });
               }}
             />

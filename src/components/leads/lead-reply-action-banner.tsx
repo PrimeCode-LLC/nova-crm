@@ -63,9 +63,15 @@ export function LeadReplyActionBanner({
   const [confirmSend, setConfirmSend] = React.useState(false);
   const [optimisticPending, setOptimisticPending] = React.useState(false);
   const [streamReveal, setStreamReveal] = React.useState<string | null>(null);
+  // Do not overwrite draft body/subject from poll while the user is editing.
+  const dirtyRef = React.useRef(false);
 
   const actionId = lead.pendingReplyActionId?.trim() ?? "";
   const pending = hasPendingReplyAction(lead);
+
+  React.useEffect(() => {
+    dirtyRef.current = false;
+  }, [actionId]);
 
   const hydrateCompletion = React.useCallback(
     (completion: ReplyActionCompletionOutcome | undefined) => {
@@ -97,8 +103,10 @@ export function LeadReplyActionBanner({
         return;
       }
       setAction(data.action);
-      setDraftBody(data.action.draftBody ?? "");
-      setDraftSubject(data.action.draftSubject ?? "");
+      if (!dirtyRef.current) {
+        setDraftBody(data.action.draftBody ?? "");
+        setDraftSubject(data.action.draftSubject ?? "");
+      }
       if (data.action.draftStatus === "ready") {
         setOptimisticPending(false);
       }
@@ -203,6 +211,7 @@ export function LeadReplyActionBanner({
     setBusy(true);
     setConfirmSend(false);
     if (decision === "regenerate") {
+      dirtyRef.current = false;
       setOptimisticPending(true);
       setEditing(false);
       setStreamReveal(null);
@@ -236,6 +245,7 @@ export function LeadReplyActionBanner({
 
       if (decision === "regenerate" || decision === "save_draft") {
         if (data.action) {
+          dirtyRef.current = false;
           setAction(data.action);
           setDraftBody(data.action.draftBody ?? "");
           setDraftSubject(data.action.draftSubject ?? "");
@@ -410,7 +420,10 @@ export function LeadReplyActionBanner({
               <input
                 className="flex h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
                 value={draftSubject}
-                onChange={(e) => setDraftSubject(e.target.value)}
+                onChange={(e) => {
+                  dirtyRef.current = true;
+                  setDraftSubject(e.target.value);
+                }}
                 disabled={busy || (!editing && !draftReady)}
                 placeholder="Subject"
                 aria-label="Draft subject"
@@ -418,6 +431,7 @@ export function LeadReplyActionBanner({
               <Textarea
                 value={editing || !isStreamingIn ? draftBody : displayBody}
                 onChange={(e) => {
+                  dirtyRef.current = true;
                   setDraftBody(e.target.value);
                   setStreamReveal(e.target.value);
                   if (!editing) setEditing(true);

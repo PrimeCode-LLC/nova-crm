@@ -19,6 +19,7 @@ import { recordEmailEvent } from "@/lib/email/email-events-server";
 import { isSuppressed } from "@/lib/email/suppression-server";
 import {
   cancelScheduledEmailPg,
+  findActiveScheduledEmailByIdempotencyKey,
   insertScheduledEmail,
   listScheduledEmailsForMemberPg,
   retryScheduledEmailPg,
@@ -35,6 +36,38 @@ async function nudgeScheduledEmailWorker(scheduledAt: Date | string): Promise<vo
   if (Number.isNaN(when.getTime())) return;
   const delayMs = Math.max(0, when.getTime() - Date.now());
   await enqueueScheduledEmailJob({ delayMs: delayMs + 2_000 }).catch(() => null);
+}
+
+/**
+ * Cancels the pending row that owns the active idempotency key for `followupId`
+ * and releases its ledger reservation. Refuses while a send is in flight.
+ */
+async function supersedeStaleScheduledEmail(input: {
+  organizationId: string;
+  followupId: string;
+  excludeId: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const existing = await findActiveScheduledEmailByIdempotencyKey({
+    organizationId: input.organizationId,
+    idempotencyKey: input.followupId,
+  }).catch(() => null);
+  if (!existing || existing.id === input.excludeId) return { ok: false };
+  if (existing.status !== "pending") {
+    return { ok: false, error: "This follow-up is already being sent right now." };
+  }
+  const cancelled = await cancelScheduledEmailPg({
+    organizationId: input.organizationId,
+    uid: existing.mailboxOwnerUid,
+    id: existing.id,
+    reason: "superseded_by_reschedule",
+  });
+  if ("error" in cancelled) return { ok: false, error: cancelled.error };
+  await incrementOrgSendLedgerServer({
+    organizationId: input.organizationId,
+    scheduledAt: new Date(existing.scheduledAt),
+    delta: -1,
+  }).catch(() => null);
+  return { ok: true };
 }
 
 function emptySkipReasons(): Record<ScheduledSkipReason, number> {
@@ -142,7 +175,7 @@ export async function createScheduledEmailPgServer(input: {
     ...(input.forceNewThread ? { forceNewThread: true } : {}),
   };
 
-  const inserted = await insertScheduledEmail({
+  const rowInput = {
     id,
     organizationId: input.organizationId,
     mailboxOwnerUid: input.uid,
@@ -155,7 +188,21 @@ export async function createScheduledEmailPgServer(input: {
     fromEmail: input.from,
     subject: input.subject,
     payload,
-  });
+  };
+
+  let inserted = await insertScheduledEmail(rowInput);
+  if ("error" in inserted && followupId) {
+    // A still-pending row for this follow-up holds the active idempotency index —
+    // usually an orphan whose follow-up lost its scheduledEmailId. Supersede it so
+    // re-scheduling the step works instead of dead-ending on a unique violation.
+    const superseded = await supersedeStaleScheduledEmail({
+      organizationId: input.organizationId,
+      followupId,
+      excludeId: id,
+    });
+    if (superseded.ok) inserted = await insertScheduledEmail(rowInput);
+    else if (superseded.error) inserted = { error: superseded.error };
+  }
 
   if (!("ok" in inserted) || !inserted.ok) {
     await incrementOrgSendLedgerServer({

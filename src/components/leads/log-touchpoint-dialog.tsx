@@ -50,8 +50,17 @@ export function LogTouchpointDialog({
   const [state, setState] = React.useState("");
   const [summary, setSummary] = React.useState("");
 
+  // Seed once per open — lead object identity churn must not wipe the form.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open || !lead) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (!lead) return;
+    if (seededRef.current) return;
+    seededRef.current = true;
     React.startTransition(() => {
       setChannel(lead.channel);
       setState("");

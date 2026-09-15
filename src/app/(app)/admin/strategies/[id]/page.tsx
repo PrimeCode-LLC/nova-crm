@@ -117,11 +117,23 @@ export default function StrategyDetailPage() {
   const strategy = data.strategies.find((s) => s.id === id);
   const orgTimezone = useOrgTimezone();
 
-  const [draft, setDraft] = React.useState<ProspectingStrategy | null>(null);
+  const [draft, setDraftState] = React.useState<ProspectingStrategy | null>(null);
   const [saving, setSaving] = React.useState(false);
+  // Skip re-seed while editing; reset when navigating to another strategy.
+  const dirtyRef = React.useRef(false);
+  const setDraft: typeof setDraftState = React.useCallback((update) => {
+    dirtyRef.current = true;
+    setDraftState(update);
+  }, []);
 
   React.useEffect(() => {
-    if (strategy) setDraft(structuredClone(strategy));
+    dirtyRef.current = false;
+  }, [strategy?.id]);
+
+  React.useEffect(() => {
+    if (!strategy) return;
+    if (dirtyRef.current) return;
+    setDraftState(structuredClone(strategy));
   }, [strategy]);
 
   const assignments = React.useMemo(
@@ -193,7 +205,8 @@ export default function StrategyDetailPage() {
       const merged = { ...draft, ...patch, updatedBy: ws.currentUserId, updatedAt: new Date().toISOString() };
       const next = normalizeStrategy(merged);
       await data.updateStrategy(id, next);
-      setDraft(next);
+      dirtyRef.current = false;
+      setDraftState(next);
       toast.success("Strategy saved");
     } catch (e) {
       toast.error("Save failed", {

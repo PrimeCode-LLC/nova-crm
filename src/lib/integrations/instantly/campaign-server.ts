@@ -120,33 +120,39 @@ export async function syncCampaignStatsFromInstantly(
   const db = getAdminDb();
   if (!db) throw new Error("Database not configured");
   const ref = db.collection(COLLECTIONS.campaigns).doc(novaCampaignId);
-  const snap = await ref.get();
-  const prev =
-    snap.exists && snap.data()?.stats && typeof snap.data()?.stats === "object"
-      ? (snap.data()!.stats as Campaign["stats"])
-      : { sent: 0, replied: 0, meetings: 0, closed: 0 };
-  const stats: Campaign["stats"] = {
-    ...prev,
-    sent: extracted.sent || prev.sent || 0,
-    replied: extracted.replied,
-    opened: extracted.opened || prev.opened || 0,
-    bounced: extracted.bounced || prev.bounced || 0,
-    linkClicks: extracted.linkClicks || prev.linkClicks || 0,
-    unsubscribed: extracted.unsubscribed || prev.unsubscribed || 0,
-    leadsCount: extracted.leadsCount || prev.leadsCount || 0,
-    contacted: extracted.contacted || prev.contacted || 0,
-    completed: extracted.completed || prev.completed || 0,
-  };
-  await ref.update(
-    stampForUpdate(
-      {
-        stats,
-        status: novaStatus,
-        lastSyncedAt: new Date().toISOString(),
-      },
-      uid,
-    ),
-  );
+  // Monotonic counters: take max(local, remote) under a lock so a concurrent
+  // webhook increment is not clobbered by a stale Instantly sync snapshot.
+  const stats = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const prev =
+      snap.exists && snap.data()?.stats && typeof snap.data()?.stats === "object"
+        ? (snap.data()!.stats as Campaign["stats"])
+        : { sent: 0, replied: 0, meetings: 0, closed: 0 };
+    const next: Campaign["stats"] = {
+      ...prev,
+      sent: Math.max(extracted.sent || 0, prev.sent || 0),
+      replied: Math.max(extracted.replied || 0, prev.replied || 0),
+      opened: Math.max(extracted.opened || 0, prev.opened || 0),
+      bounced: Math.max(extracted.bounced || 0, prev.bounced || 0),
+      linkClicks: Math.max(extracted.linkClicks || 0, prev.linkClicks || 0),
+      unsubscribed: Math.max(extracted.unsubscribed || 0, prev.unsubscribed || 0),
+      leadsCount: Math.max(extracted.leadsCount || 0, prev.leadsCount || 0),
+      contacted: Math.max(extracted.contacted || 0, prev.contacted || 0),
+      completed: Math.max(extracted.completed || 0, prev.completed || 0),
+    };
+    tx.update(
+      ref,
+      stampForUpdate(
+        {
+          stats: next,
+          status: novaStatus,
+          lastSyncedAt: new Date().toISOString(),
+        },
+        uid,
+      ),
+    );
+    return next;
+  });
   return stats;
 }
 
@@ -190,12 +196,24 @@ export async function incrementCampaignStatServer(
 ): Promise<void> {
   const db = getAdminDb();
   if (!db) return;
-  await db
-    .collection(COLLECTIONS.campaigns)
-    .doc(campaignId)
-    .update({
-      [`stats.${field}`]: FieldValue.increment(delta),
+  const ref = db.collection(COLLECTIONS.campaigns).doc(campaignId);
+  // Nested `stats.field` increments must re-read the object — the document
+  // shim does not expand dotted FieldPath keys.
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const prev =
+      snap.data()?.stats && typeof snap.data()?.stats === "object"
+        ? (snap.data()!.stats as Record<string, number>)
+        : {};
+    const next = {
+      ...prev,
+      [field]: Math.max(0, Number(prev[field] ?? 0) + delta),
+    };
+    tx.update(ref, {
+      stats: next,
       lastSyncedAt: new Date().toISOString(),
       updatedAt: FieldValue.serverTimestamp(),
     });
+  });
 }

@@ -81,8 +81,16 @@ export function AvailabilityScheduleEditor({
     [schedule.timezone],
   );
 
+  // Seed once per open — schedule poll must not wipe in-progress edits.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     setTimezone(schedule.timezone);
     setMinNoticeHours(String(schedule.minNoticeHours));
     setMaxDaysAhead(String(schedule.maxDaysAhead));

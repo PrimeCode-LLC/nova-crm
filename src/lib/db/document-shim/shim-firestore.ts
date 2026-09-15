@@ -14,8 +14,10 @@ import {
   deleteDocument,
   getDocument,
   queryDocuments,
+  runDocumentTransaction,
   setDocument,
   updateDocument,
+  type DocumentTxHandle,
   type QueryFilter,
   type QuerySpec,
   type StoredDoc,
@@ -143,11 +145,15 @@ export class PgDocumentReference {
   }
 
   async create(data: DocumentData): Promise<void> {
-    const existing = await getDocument(this.path);
-    if (existing) {
-      throw new Error(`Document ${this.path} already exists`);
-    }
-    await this.set(data);
+    // Exists-check and insert must share one locked transaction, or two
+    // concurrent creates both see "missing" and the second overwrites the first.
+    await runDocumentTransaction(async (dtx) => {
+      const existing = await dtx.read(this.path);
+      if (existing) {
+        throw new Error(`Document ${this.path} already exists`);
+      }
+      await dtx.write(this.path, data, false);
+    });
   }
 
   async update(data: DocumentData): Promise<void> {
@@ -407,35 +413,52 @@ export class PgWriteBatch {
     return this;
   }
 
+  /** Atomic: a batch that fails partway leaves no writes behind. */
   async commit(): Promise<void> {
-    for (const op of this.ops) {
-      switch (op.type) {
-        case "set":
-          await op.ref.set(op.data, { merge: op.merge });
-          break;
-        case "update":
-          await op.ref.update(op.data);
-          break;
-        case "delete":
-          await op.ref.delete();
-          break;
+    if (this.ops.length === 0) return;
+    const ops = this.ops;
+    await runDocumentTransaction(async (dtx) => {
+      for (const op of ops) {
+        switch (op.type) {
+          case "set":
+            await dtx.write(op.ref.path, op.data, op.merge === true);
+            break;
+          case "update":
+            await dtx.update(op.ref.path, op.data);
+            break;
+          case "delete":
+            await dtx.remove(op.ref.path);
+            break;
+        }
       }
-    }
+    });
   }
 }
 
+/**
+ * Firestore-style transaction over one Postgres transaction.
+ *
+ * `get` advisory-locks the path it reads and holds it until commit, so the
+ * check-then-act patterns callers depend on (claim a chunk, reserve an identity,
+ * bump a counter under a ceiling) cannot interleave. Writes are buffered and
+ * applied on commit; if the callback throws, the transaction rolls back.
+ */
 export class PgTransaction {
-  private readonly pendingGets = new Map<string, StoredDoc | null>();
+  /** Locally staged view, so a `get` after a write sees this transaction's own changes. */
+  private readonly staged = new Map<string, StoredDoc | null>();
+  private readonly ops: BatchOp[] = [];
 
-  constructor(private readonly firestore: PgFirestore) {}
+  constructor(
+    private readonly firestore: PgFirestore,
+    private readonly dtx: DocumentTxHandle,
+  ) {}
 
   async get(ref: PgDocumentReference): Promise<PgDocumentSnapshot> {
-    if (this.pendingGets.has(ref.path)) {
-      const doc = this.pendingGets.get(ref.path) ?? null;
-      return new PgDocumentSnapshot(ref, doc);
+    if (this.staged.has(ref.path)) {
+      return new PgDocumentSnapshot(ref, this.staged.get(ref.path) ?? null);
     }
-    const doc = await getDocument(ref.path);
-    this.pendingGets.set(ref.path, doc);
+    const doc = await this.dtx.read(ref.path);
+    this.staged.set(ref.path, doc);
     return new PgDocumentSnapshot(ref, doc);
   }
 
@@ -444,14 +467,12 @@ export class PgTransaction {
     data: DocumentData,
     options?: { merge?: boolean },
   ): PgTransaction {
-    const existing = this.pendingGets.get(ref.path);
-    let payload: Record<string, unknown>;
-    if (options?.merge && existing) {
-      payload = { ...existing.payload, ...applyFieldValues({}, data) };
-    } else {
-      payload = applyFieldValues({}, data);
-    }
-    this.pendingGets.set(ref.path, {
+    const existing = this.staged.get(ref.path);
+    const payload =
+      options?.merge && existing
+        ? { ...existing.payload, ...applyFieldValues({}, data) }
+        : applyFieldValues({}, data);
+    this.staged.set(ref.path, {
       path: ref.path,
       organizationId: null,
       collectionRoot: ref.path.split("/")[0] ?? "",
@@ -459,21 +480,24 @@ export class PgTransaction {
       createdAt: existing?.createdAt ?? new Date(),
       updatedAt: new Date(),
     });
+    this.ops.push({ type: "set", ref, data, merge: options?.merge });
     return this;
   }
 
   update(ref: PgDocumentReference, data: DocumentData): PgTransaction {
-    const existing = this.pendingGets.get(ref.path);
+    const existing = this.staged.get(ref.path);
     if (!existing) {
       throw new Error(`Transaction update: document ${ref.path} not found`);
     }
     const payload = applyFieldValues(existing.payload, data);
-    this.pendingGets.set(ref.path, { ...existing, payload, updatedAt: new Date() });
+    this.staged.set(ref.path, { ...existing, payload, updatedAt: new Date() });
+    this.ops.push({ type: "update", ref, data });
     return this;
   }
 
   delete(ref: PgDocumentReference): PgTransaction {
-    this.pendingGets.set(ref.path, null);
+    this.staged.set(ref.path, null);
+    this.ops.push({ type: "delete", ref });
     return this;
   }
 
@@ -482,11 +506,17 @@ export class PgTransaction {
   }
 
   async commit(): Promise<void> {
-    for (const [path, doc] of this.pendingGets) {
-      if (doc === null) {
-        await deleteDocument(path);
-      } else {
-        await setDocument(path, doc.payload, false);
+    for (const op of this.ops) {
+      switch (op.type) {
+        case "set":
+          await this.dtx.write(op.ref.path, op.data, op.merge === true);
+          break;
+        case "update":
+          await this.dtx.update(op.ref.path, op.data);
+          break;
+        case "delete":
+          await this.dtx.remove(op.ref.path);
+          break;
       }
     }
   }
@@ -549,10 +579,12 @@ export class PgFirestore {
   async runTransaction<T>(
     fn: (tx: PgTransaction) => Promise<T>,
   ): Promise<T> {
-    const tx = new PgTransaction(this);
-    const result = await fn(tx);
-    await tx.commit();
-    return result;
+    return runDocumentTransaction(async (dtx) => {
+      const tx = new PgTransaction(this, dtx);
+      const result = await fn(tx);
+      await tx.commit();
+      return result;
+    });
   }
 }
 

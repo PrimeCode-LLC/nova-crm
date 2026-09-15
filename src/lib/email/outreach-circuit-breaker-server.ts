@@ -103,47 +103,88 @@ export async function evaluateCircuitBreakerForConfig(input: {
   armId?: string;
 }): Promise<CircuitBreakerState> {
   const scorecard = await getOutreachConfigScorecard(input.organizationId, input.configId);
-  const current = await getCircuitBreakerState(input.organizationId);
-  if (!scorecard || scorecard.sent < 50) return current;
+  if (!scorecard || scorecard.sent < 50) {
+    return getCircuitBreakerState(input.organizationId);
+  }
 
   const baseline = await orgTrailingBaseline(input.organizationId);
-  let orgPaused = current.orgPaused;
-  const pausedArmIds = new Set(current.pausedArmIds);
-  let reason = current.reason;
+  const db = getAdminDb();
+  if (!db) return { orgPaused: false, pausedArmIds: [] };
+  const ref = db
+    .collection(COLLECTIONS.organizations)
+    .doc(input.organizationId)
+    .collection("settings")
+    .doc(ORG_SETTINGS_DOC);
 
-  if (scorecard.bounceRate > 0.03) {
-    orgPaused = true;
-    reason = `Hard bounce rate ${(100 * scorecard.bounceRate).toFixed(1)}% > 3%`;
-  }
-  if (scorecard.spamComplaintRate > 0.001) {
-    orgPaused = true;
-    reason = `Spam complaint rate ${(100 * scorecard.spamComplaintRate).toFixed(2)}% > 0.1%`;
-  }
+  const { next, changed } = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current: CircuitBreakerState = snap.exists
+      ? {
+          orgPaused: snap.data()?.orgPaused === true,
+          pausedArmIds: Array.isArray(snap.data()?.pausedArmIds)
+            ? snap.data()!.pausedArmIds.map(String)
+            : [],
+          reason:
+            typeof snap.data()?.reason === "string"
+              ? snap.data()!.reason
+              : undefined,
+          trippedAt:
+            typeof snap.data()?.trippedAt === "string"
+              ? snap.data()!.trippedAt
+              : undefined,
+        }
+      : { orgPaused: false, pausedArmIds: [] };
 
-  // Arm-level: unsubscribe or hard_no more than 2× trailing org baseline.
-  const unsubTrip = scorecard.unsubscribeRate > baseline.unsubscribeRate * 2;
-  const hardTrip = scorecard.hardNoRate > baseline.hardNoRate * 2;
-  if ((unsubTrip || hardTrip) && input.armId) {
-    pausedArmIds.add(input.armId);
-    reason =
-      reason ??
-      `Arm ${input.armId} paused: unsub/hard_no >2× baseline (unsub=${(100 * scorecard.unsubscribeRate).toFixed(1)}% vs ${(100 * baseline.unsubscribeRate).toFixed(1)}%; hard_no=${(100 * scorecard.hardNoRate).toFixed(1)}% vs ${(100 * baseline.hardNoRate).toFixed(1)}%)`;
-  }
+    let orgPaused = current.orgPaused;
+    const pausedArmIds = new Set(current.pausedArmIds);
+    let reason = current.reason;
 
-  const next: CircuitBreakerState = {
-    orgPaused,
-    pausedArmIds: [...pausedArmIds],
-    reason,
-    trippedAt: orgPaused || pausedArmIds.size ? new Date().toISOString() : current.trippedAt,
-    baseline,
-  };
+    if (scorecard.bounceRate > 0.03) {
+      orgPaused = true;
+      reason = `Hard bounce rate ${(100 * scorecard.bounceRate).toFixed(1)}% > 3%`;
+    }
+    if (scorecard.spamComplaintRate > 0.001) {
+      orgPaused = true;
+      reason = `Spam complaint rate ${(100 * scorecard.spamComplaintRate).toFixed(2)}% > 0.1%`;
+    }
 
-  if (
-    orgPaused !== current.orgPaused ||
-    pausedArmIds.size !== current.pausedArmIds.length ||
-    [...pausedArmIds].some((id) => !current.pausedArmIds.includes(id))
-  ) {
-    await setCircuitBreakerState(input.organizationId, next);
+    const unsubTrip = scorecard.unsubscribeRate > baseline.unsubscribeRate * 2;
+    const hardTrip = scorecard.hardNoRate > baseline.hardNoRate * 2;
+    if ((unsubTrip || hardTrip) && input.armId) {
+      pausedArmIds.add(input.armId);
+      reason =
+        reason ??
+        `Arm ${input.armId} paused: unsub/hard_no >2× baseline (unsub=${(100 * scorecard.unsubscribeRate).toFixed(1)}% vs ${(100 * baseline.unsubscribeRate).toFixed(1)}%; hard_no=${(100 * scorecard.hardNoRate).toFixed(1)}% vs ${(100 * baseline.hardNoRate).toFixed(1)}%)`;
+    }
+
+    const nextState: CircuitBreakerState = {
+      orgPaused,
+      pausedArmIds: [...pausedArmIds],
+      reason,
+      trippedAt:
+        orgPaused || pausedArmIds.size ? new Date().toISOString() : current.trippedAt,
+      baseline,
+    };
+
+    const didChange =
+      orgPaused !== current.orgPaused ||
+      pausedArmIds.size !== current.pausedArmIds.length ||
+      [...pausedArmIds].some((id) => !current.pausedArmIds.includes(id));
+
+    if (didChange) {
+      tx.set(
+        ref,
+        {
+          ...nextState,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+    }
+    return { next: nextState, changed: didChange };
+  });
+
+  if (changed) {
     void recordAudit({
       organizationId: input.organizationId,
       actorUid: "system",

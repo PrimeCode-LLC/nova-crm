@@ -150,8 +150,17 @@ export function ProspectIntakeDialog({
   const [bestChannel, setBestChannel] = React.useState<BestContactChannel | typeof UNSET>(UNSET);
   const [linkedin, setLinkedin] = React.useState("");
 
+  // Seed once per open — account/contact poll must not wipe intake edits.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open || !account || !contact) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (!account || !contact) return;
+    if (seededRef.current) return;
+    seededRef.current = true;
     React.startTransition(() => {
       setBizName(account.name ?? "");
       setIndustry(account.industry ?? "");

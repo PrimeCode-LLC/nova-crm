@@ -136,8 +136,16 @@ export function ScheduleMeetingDialog({
     [dateYmd],
   );
 
+  // Seed once per open — workspace refresh must not wipe attendee / time fields.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     const base = initialDate ?? new Date();
     const start = initialStartTime ?? "09:00";
     setEventTitle("");

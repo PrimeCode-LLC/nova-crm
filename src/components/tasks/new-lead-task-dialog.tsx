@@ -128,8 +128,16 @@ export function NewLeadTaskDialog({
     return fromMembers.length > 0 ? fromMembers : workspaceUsersAsOptions(users);
   }, [open, isDemo, users, membersQuery.data, membersQuery.isError]);
 
+  // Seed once per open — leads list refresh must not wipe title / assignee.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     const fixed = fixedLeadId ? leads.find((l) => l.id === fixedLeadId) : undefined;
     React.startTransition(() => {
       setLeadId(fixedLeadId ?? leads[0]?.id ?? "");

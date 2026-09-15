@@ -101,8 +101,16 @@ export function ScheduleFromThreadDialog({
     ];
   }, [currentUserId, hostsQuery.data]);
 
+  // Seed once per open — prop identity churn must not reset guest / time fields.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     const base = new Date();
     setTitle(defaultTitle?.trim() || "Meeting");
     setDateYmd(format(base, "yyyy-MM-dd"));

@@ -411,14 +411,48 @@ export async function createOrganizationServer(input: {
 export async function bumpOrganizationSeatsServer(
   orgId: string,
   delta: number,
-): Promise<void> {
+  opts?: { enforceMax?: boolean },
+): Promise<{ ok: true; seatsUsed: number } | { ok: false; error: string }> {
   const db = getAdminDb();
-  if (!db) return;
-  await db.collection(COLLECTIONS.organizations).doc(orgId).update({
-    seatsUsed: FieldValue.increment(delta),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
-  await mirrorOrganizationAfterWrite(orgId);
+  if (!db) return { ok: false, error: "Database not configured" };
+  const ref = db.collection(COLLECTIONS.organizations).doc(orgId);
+  try {
+    const seatsUsed = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error("Organization not found");
+      const data = snap.data() as {
+        seatsUsed?: unknown;
+        maxUsers?: unknown;
+      };
+      const used = Math.max(0, Number(data.seatsUsed ?? 0));
+      const max =
+        data.maxUsers == null || data.maxUsers === ""
+          ? null
+          : Number(data.maxUsers);
+      if (
+        opts?.enforceMax &&
+        delta > 0 &&
+        max != null &&
+        Number.isFinite(max) &&
+        used + delta > max
+      ) {
+        throw new Error(
+          `Seat limit reached (${used}/${max}). Upgrade plan or remove an inactive member.`,
+        );
+      }
+      const next = Math.max(0, used + delta);
+      tx.update(ref, {
+        seatsUsed: next,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return next;
+    });
+    await mirrorOrganizationAfterWrite(orgId);
+    return { ok: true, seatsUsed };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
+  }
 }
 
 export async function updateOrganizationServer(
@@ -436,13 +470,10 @@ export async function updateOrganizationServer(
   if (!db) return { error: "Database not configured" };
 
   const ref = db.collection(COLLECTIONS.organizations).doc(orgId);
-  const cur = await ref.get();
-  if (!cur.exists) return { error: "Organization not found" };
 
-  const updates: Record<string, unknown> = {
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-  if (patch.name !== undefined) updates.name = patch.name.trim();
+  // Slug uniqueness is checked outside the org-doc lock (cross-doc). Re-check
+  // inside the transaction that the org still exists before writing.
+  let nextSlug: string | undefined;
   if (patch.slug !== undefined) {
     const s = patch.slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
     if (!s) return { error: "Invalid slug" };
@@ -453,31 +484,48 @@ export async function updateOrganizationServer(
       .get();
     const clash = dup.docs.some((d) => d.id !== orgId);
     if (clash) return { error: "Slug already in use" };
-    updates.slug = s;
-  }
-  if (patch.status !== undefined) updates.status = patch.status;
-  if (patch.planId !== undefined) updates.planId = patch.planId;
-  if (patch.maxUsers !== undefined) {
-    updates.maxUsers = patch.maxUsers === null ? null : patch.maxUsers;
-  }
-  if (patch.settings !== undefined) {
-    const prevSettings = docToOrg(orgId, cur.data()!).settings;
-    const merged: OrganizationSettings = { ...prevSettings };
-    const incoming = patch.settings as Partial<OrganizationSettings>;
-    for (const k of Object.keys(incoming) as (keyof OrganizationSettings)[]) {
-      if (!Object.prototype.hasOwnProperty.call(incoming, k)) continue;
-      const v = incoming[k];
-      if (v === undefined) continue;
-      if (typeof v === "string" && v.trim() === "") {
-        delete merged[k];
-      } else {
-        merged[k] = v as never;
-      }
-    }
-    updates.settings = settingsForFirestore(merged);
+    nextSlug = s;
   }
 
-  await ref.update(updates);
+  try {
+    await db.runTransaction(async (tx) => {
+      const cur = await tx.get(ref);
+      if (!cur.exists) throw new Error("Organization not found");
+
+      const updates: Record<string, unknown> = {
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+      if (patch.name !== undefined) updates.name = patch.name.trim();
+      if (nextSlug !== undefined) updates.slug = nextSlug;
+      if (patch.status !== undefined) updates.status = patch.status;
+      if (patch.planId !== undefined) updates.planId = patch.planId;
+      if (patch.maxUsers !== undefined) {
+        updates.maxUsers = patch.maxUsers === null ? null : patch.maxUsers;
+      }
+      if (patch.settings !== undefined) {
+        const prevSettings = docToOrg(orgId, cur.data()!).settings;
+        const merged: OrganizationSettings = { ...prevSettings };
+        const incoming = patch.settings as Partial<OrganizationSettings>;
+        for (const k of Object.keys(incoming) as (keyof OrganizationSettings)[]) {
+          if (!Object.prototype.hasOwnProperty.call(incoming, k)) continue;
+          const v = incoming[k];
+          if (v === undefined) continue;
+          if (typeof v === "string" && v.trim() === "") {
+            delete merged[k];
+          } else {
+            merged[k] = v as never;
+          }
+        }
+        updates.settings = settingsForFirestore(merged);
+      }
+
+      tx.update(ref, updates);
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { error: message };
+  }
+
   await mirrorOrganizationAfterWrite(orgId);
   return { ok: true };
 }

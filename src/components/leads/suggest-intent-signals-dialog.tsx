@@ -74,8 +74,17 @@ export function SuggestIntentSignalsDialog({
   const [rows, setRows] = React.useState<Row[]>([]);
   const [mode, setMode] = React.useState<ApplyMode>("append");
 
+  // Seed once per open once suggestions arrive — poll must not reset row toggles.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    if (!suggestions?.length) return;
+    seededRef.current = true;
     setRows(
       suggestions.map((s, i) => ({
         ...s,

@@ -44,11 +44,32 @@ async function findExisting(
   tx: TenantTx,
   entity: CrmEntity,
   id: string,
-): Promise<{ organizationId: string; payload: unknown } | null> {
+  opts?: { forUpdate?: boolean },
+): Promise<{ organizationId: string; payload: unknown; touches?: number; leadCount?: number } | null> {
+  // Serialize concurrent payload merges on the same row (same class of bug as
+  // the document-store lost-update: last writer would drop the other's fields).
+  if (opts?.forUpdate) {
+    switch (entity) {
+      case "account":
+        await tx.$executeRaw`SELECT 1 FROM accounts WHERE id = ${id} FOR UPDATE`;
+        break;
+      case "contact":
+        await tx.$executeRaw`SELECT 1 FROM contacts WHERE id = ${id} FOR UPDATE`;
+        break;
+      case "lead":
+        await tx.$executeRaw`SELECT 1 FROM leads WHERE id = ${id} FOR UPDATE`;
+        break;
+      case "deal":
+        await tx.$executeRaw`SELECT 1 FROM deals WHERE id = ${id} FOR UPDATE`;
+        break;
+    }
+  }
   switch (entity) {
     case "account": {
       const row = await tx.account.findUnique({ where: { id } });
-      return row ? { organizationId: row.organizationId, payload: row.payload } : null;
+      return row
+        ? { organizationId: row.organizationId, payload: row.payload, leadCount: row.leadCount }
+        : null;
     }
     case "contact": {
       const row = await tx.contact.findUnique({ where: { id } });
@@ -56,7 +77,9 @@ async function findExisting(
     }
     case "lead": {
       const row = await tx.lead.findUnique({ where: { id } });
-      return row ? { organizationId: row.organizationId, payload: row.payload } : null;
+      return row
+        ? { organizationId: row.organizationId, payload: row.payload, touches: row.touches }
+        : null;
     }
     case "deal": {
       const row = await tx.deal.findUnique({ where: { id } });
@@ -217,7 +240,7 @@ export async function patchCrmEntityPostgres(
   }
 
   const result = await withOrganizationScope(organizationId, async (tx) => {
-    const existing = await findExisting(tx, entity, id);
+    const existing = await findExisting(tx, entity, id, { forUpdate: true });
     if (!existing) {
       return { ok: false as const, status: 404, error: `${entity} not found` };
     }
@@ -282,6 +305,7 @@ export async function deleteCrmEntityPostgres(
 
     if (entity === "lead" && opts?.accountId) {
       const accountId = opts.accountId;
+      await tx.$executeRaw`SELECT 1 FROM accounts WHERE id = ${accountId} FOR UPDATE`;
       const account = await tx.account.findUnique({ where: { id: accountId } });
       if (account && account.organizationId === organizationId) {
         const nextCount =
@@ -354,8 +378,8 @@ export async function bumpLeadActivityPostgres(
     return { ok: false, status: 503, error: "DATABASE_URL is not configured" };
   }
   const result = await withOrganizationScope(organizationId, async (tx) => {
-    const row = await tx.lead.findFirst({ where: { id: leadId, organizationId } });
-    if (!row) {
+    const row = await findExisting(tx, "lead", leadId, { forUpdate: true });
+    if (!row || row.organizationId !== organizationId) {
       return { ok: false as const, status: 404, error: "lead not found" };
     }
     const merged = payloadRecord(row.payload);

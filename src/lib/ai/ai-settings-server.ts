@@ -128,15 +128,22 @@ export async function updateOrganizationAiSettingsServer(
 ): Promise<{ ok: true } | { error: string }> {
   const ref = settingsDoc(organizationId);
   if (!ref) return { error: "Database not configured" };
-  const current = await getOrganizationAiSettingsServer(organizationId);
-  const next: OrganizationAiSettings = {
-    ...current,
-    ...patch,
-    features: patch.features ? { ...current.features, ...patch.features } : current.features,
-    updatedAt: new Date().toISOString(),
-  };
-  // Firestore rejects `undefined` anywhere inside the document.
-  await ref.set(stripUndefinedDeep(next), { merge: true });
+  const db = getAdminDb();
+  if (!db) return { error: "Database not configured" };
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = mergeSettings(snap.data() as Record<string, unknown> | undefined);
+    const next: OrganizationAiSettings = {
+      ...current,
+      ...patch,
+      features: patch.features
+        ? { ...current.features, ...patch.features }
+        : current.features,
+      updatedAt: new Date().toISOString(),
+    };
+    // Firestore rejects `undefined` anywhere inside the document.
+    tx.set(ref, stripUndefinedDeep(next), { merge: true });
+  });
   return { ok: true };
 }
 
@@ -186,15 +193,20 @@ export async function upsertAiPromptServer(
   if (!orgId) return { error: "organizationId required" };
   const ref = orgPromptDoc(orgId, prompt.featureKey);
   if (!ref) return { error: "Database not configured" };
-  const existingSnap = await ref.get();
-  const existingVersion =
-    existingSnap.exists && typeof (existingSnap.data() as AiPromptTemplate)?.version === "number"
-      ? ((existingSnap.data() as AiPromptTemplate).version ?? 1)
-      : 1;
-  await ref.set({
-    ...prompt,
-    version: existingVersion + 1,
-    updatedAt: new Date().toISOString(),
+  const db = getAdminDb();
+  if (!db) return { error: "Database not configured" };
+  await db.runTransaction(async (tx) => {
+    const existingSnap = await tx.get(ref);
+    const existingVersion =
+      existingSnap.exists &&
+      typeof (existingSnap.data() as AiPromptTemplate)?.version === "number"
+        ? ((existingSnap.data() as AiPromptTemplate).version ?? 1)
+        : 1;
+    tx.set(ref, {
+      ...prompt,
+      version: existingVersion + 1,
+      updatedAt: new Date().toISOString(),
+    });
   });
   return { ok: true };
 }
