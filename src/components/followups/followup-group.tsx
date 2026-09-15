@@ -6,6 +6,7 @@ import {
   CalendarClock,
   ChevronLeft,
   ChevronRight,
+  Clock,
   MailWarning,
   Pencil,
   RefreshCw,
@@ -21,7 +22,9 @@ import { UserChip } from "@/components/common/user-chip";
 import { ListPaginationBar } from "@/components/followups/list-pagination-bar";
 import { PRIORITY_TONE } from "@/lib/constants";
 import {
+  followupSendState,
   formatFollowupDueLabel,
+  formatFollowupQueuedLabel,
   isFollowupRetryable,
   type FollowupDueBucket,
 } from "@/lib/followup-due-display";
@@ -262,15 +265,28 @@ const FollowupRow = React.memo(function FollowupRow({
   onRequestReschedule: (f: Followup) => void;
 }) {
   const done = Boolean(f.completedAt);
+  const sendState = followupSendState(f);
+  const queued = sendState === "queued" || sendState === "queued_late";
+  // Try now on a queued row cancels the queued email and re-queues it, which
+  // sends it to the back of the per-mailbox send gap. Only offer it when there
+  // is nothing in flight, or when the send actually needs a retry.
   const showTryNow =
     mutate &&
-    (bucket === "overdue" ||
-      bucket === "today" ||
-      bucket === "failed" ||
-      isFollowupRetryable(f));
-  const isFailed = f.deliveryStatus === "failed";
-  const isRetrying = f.deliveryStatus === "needs_retry";
-  const due = formatFollowupDueLabel(f.dueAt, bucket, timeZone, { isViewToday });
+    !done &&
+    (isFollowupRetryable(f) ||
+      (!queued && (bucket === "overdue" || bucket === "today" || bucket === "failed")));
+  const isFailed = sendState === "failed";
+  const isRetrying = sendState === "retrying";
+  const due = queued
+    ? {
+        label: formatFollowupQueuedLabel(
+          f.emailScheduledAt,
+          sendState as "queued" | "queued_late",
+          timeZone,
+        ),
+        soon: sendState === "queued",
+      }
+    : formatFollowupDueLabel(f.dueAt, bucket, timeZone, { isViewToday });
 
   return (
     <div
@@ -337,6 +353,12 @@ const FollowupRow = React.memo(function FollowupRow({
               Retrying
             </Badge>
           ) : null}
+          {queued ? (
+            <Badge variant="outline" className="text-[10px] gap-1">
+              <Clock className="h-2.5 w-2.5" />
+              Queued
+            </Badge>
+          ) : null}
           {f.auto && (
             <Badge variant="outline" className="text-[10px] gap-1">
               <Sparkles className="h-2.5 w-2.5" /> Auto
@@ -358,11 +380,13 @@ const FollowupRow = React.memo(function FollowupRow({
         <span
           className={cn(
             "text-xs tabular-nums whitespace-nowrap",
-            bucket === "overdue" || bucket === "failed"
-              ? "text-destructive"
-              : due.soon
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground",
+            queued
+              ? "text-muted-foreground"
+              : bucket === "overdue" || bucket === "failed"
+                ? "text-destructive"
+                : due.soon
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground",
           )}
         >
           {due.label}

@@ -8,6 +8,13 @@ import {
 /** Max auto-retries for transient SMTP / network failures before permanent fail. */
 export const SCHEDULED_SEND_MAX_ATTEMPTS = 3;
 
+/**
+ * Max consecutive daily-quota deferrals before the send is failed outright.
+ * Quota deferrals do not consume a send attempt, so without a ceiling a mailbox
+ * that is permanently over its limit defers the same email forever, invisibly.
+ */
+export const SCHEDULED_QUOTA_MAX_DEFERRALS = 3;
+
 /** Default inter-send gap (seconds) when mailbox has no override. */
 export const DEFAULT_SEND_GAP_SECONDS = 15;
 

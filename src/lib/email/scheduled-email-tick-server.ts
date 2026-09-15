@@ -65,5 +65,14 @@ export async function runScheduledEmailTickServer(input?: {
   }
 
   console.info("[scheduled-email-tick]", { reclaimed, claimed: claimed.length, enqueued });
+
+  // Self-throttled; surfaces a queue that is due but not draining.
+  if (!input?.organizationId && !input?.mailboxOwnerUid) {
+    const { alertStalledScheduledEmailsServer } = await import(
+      "@/lib/email/scheduled-email-stall-alert-server"
+    );
+    await alertStalledScheduledEmailsServer().catch(() => null);
+  }
+
   return { reclaimed, claimed: claimed.length, enqueued };
 }

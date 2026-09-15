@@ -75,6 +75,33 @@ export function isFollowupDeliveryIssue(f: { deliveryStatus?: string }): boolean
 }
 
 /**
+ * Outbound state of one followup, so a queued email is never displayed as a
+ * stalled reminder. `queued_late` means the send time has passed and the email
+ * is waiting its turn behind the per-mailbox send gap — normal, not a failure.
+ */
+export type FollowupSendState = "failed" | "retrying" | "queued" | "queued_late" | "none";
+
+export function followupSendState(
+  f: Pick<Followup, "deliveryStatus" | "scheduledEmailId" | "emailScheduledAt">,
+  now = Date.now(),
+): FollowupSendState {
+  if (f.deliveryStatus === "failed") return "failed";
+  if (f.deliveryStatus === "needs_retry") return "retrying";
+  if (!f.scheduledEmailId || f.deliveryStatus !== "scheduled") return "none";
+  const sendAt = f.emailScheduledAt ? new Date(f.emailScheduledAt).getTime() : NaN;
+  if (Number.isFinite(sendAt) && sendAt > now) return "queued";
+  return "queued_late";
+}
+
+export function isFollowupQueuedForSend(
+  f: Pick<Followup, "deliveryStatus" | "scheduledEmailId" | "emailScheduledAt">,
+  now = Date.now(),
+): boolean {
+  const state = followupSendState(f, now);
+  return state === "queued" || state === "queued_late";
+}
+
+/**
  * Whether "Try now" can queue an outbound email (vs only bumping the due time).
  * Ignores an existing scheduledEmailId so callers can cancel + re-queue ASAP.
  */
@@ -184,6 +211,47 @@ export function formatFollowupDueLabel(
     label: relative ? `${dateTime} · ${relative}` : dateTime,
     soon,
   };
+}
+
+/**
+ * Label for a followup whose email is already queued. Never renders a bare
+ * "1 hour ago", which reads as a stalled task when the email is simply waiting
+ * behind the mailbox send gap.
+ */
+export function formatFollowupQueuedLabel(
+  emailScheduledAt: string | undefined,
+  state: "queued" | "queued_late",
+  timeZone: string,
+  options?: { now?: Date },
+): string {
+  const now = options?.now ?? new Date();
+  const sendAt = emailScheduledAt ? new Date(emailScheduledAt) : null;
+  if (!sendAt || Number.isNaN(sendAt.getTime())) {
+    return state === "queued" ? "Queued to send" : "In send queue";
+  }
+
+  const timeOnly = formatWallInZone(sendAt, timeZone, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (state === "queued") {
+    let relative = "";
+    try {
+      relative = formatDistanceToNowStrict(sendAt, { addSuffix: true });
+    } catch {
+      relative = "";
+    }
+    return relative ? `Sends ${timeOnly} · ${relative}` : `Sends ${timeOnly}`;
+  }
+
+  const waitedMin = Math.max(0, Math.round((now.getTime() - sendAt.getTime()) / 60_000));
+  if (waitedMin < 2) return `In send queue · due ${timeOnly}`;
+  const waited =
+    waitedMin < 60
+      ? `${waitedMin}m`
+      : `${Math.floor(waitedMin / 60)}h${waitedMin % 60 ? ` ${waitedMin % 60}m` : ""}`;
+  return `In send queue · waiting ${waited}`;
 }
 
 export function dueAtForReschedulePreset(

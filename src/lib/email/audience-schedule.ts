@@ -99,10 +99,7 @@ export function defaultAudienceScheduleDatetimeLocal(input: {
   const minMs = now.getTime() + 60_000;
 
   const spreadKey = input.spreadKey?.trim();
-  const windowMinutes = Math.max(1, (window.endHour - window.startHour) * 60);
-  const spreadMinutes = spreadKey
-    ? Math.floor(hashToUnit(spreadKey) * windowMinutes)
-    : 0;
+  const spreadUnit = spreadKey ? hashToUnit(spreadKey) : 0;
 
   const slotOnDay = (dayKey: string): Date | null => {
     if (policy && !isOrgWorkingDay(dayKey, policy, zone)) return null;
@@ -110,9 +107,13 @@ export function defaultAudienceScheduleDatetimeLocal(input: {
     const windowEnd = zonedWallTimeToUtc(dayKey, window.endHour, 0, 0, 0, zone);
     if (Number.isNaN(windowStart.getTime()) || Number.isNaN(windowEnd.getTime())) return null;
     if (minMs > windowEnd.getTime()) return null;
-    const spread = windowStart.getTime() + spreadMinutes * 60_000;
-    const ms = Math.max(minMs, Math.min(spread, windowEnd.getTime()));
-    if (ms > windowEnd.getTime()) return null;
+    // Spread across the part of the window that is still ahead. Spreading from
+    // windowStart and then clamping to `minMs` collapses a mid-window batch onto
+    // one identical timestamp, which then drains at the per-mailbox send gap.
+    const earliest = Math.max(windowStart.getTime(), minMs);
+    const usableMinutes = Math.max(0, Math.floor((windowEnd.getTime() - earliest) / 60_000));
+    const offsetMinutes = Math.floor(spreadUnit * usableMinutes);
+    const ms = Math.min(earliest + offsetMinutes * 60_000, windowEnd.getTime());
     return new Date(ms);
   };
 

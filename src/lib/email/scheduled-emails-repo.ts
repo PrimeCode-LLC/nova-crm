@@ -37,6 +37,8 @@ export type ScheduledEmailPayload = {
   referenceIds?: string[];
   forceNewThread?: boolean;
   nextRetryAt?: string;
+  /** Consecutive daily-quota deferrals, bounded by SCHEDULED_QUOTA_MAX_DEFERRALS. */
+  quotaDeferrals?: number;
 };
 
 export type ScheduledEmailRowInput = {
@@ -126,6 +128,7 @@ export function rowToScheduledEmail(row: RowShape): ScheduledEmail {
     forceNewThread: payload.forceNewThread,
     attempts: row.attempts,
     nextRetryAt: payload.nextRetryAt ?? row.notBeforeAt?.toISOString(),
+    quotaDeferrals: payload.quotaDeferrals,
     failureKind: (row.failureKind as ScheduledEmailFailureKind | null) ?? undefined,
   };
 }
@@ -619,6 +622,74 @@ export async function claimDueBatch(input?: {
       claimed.push(claimedFromRow(rawToRow(updated[0])));
     }
     return claimed;
+  });
+}
+
+export type ScheduledEmailStallStat = {
+  organizationId: string;
+  /** Rows due, claimable right now (mailbox gap clear), yet still unclaimed. */
+  claimable: number;
+  oldestClaimableAgeSeconds: number;
+  /** All pending rows past their send time, including ones held by the send gap. */
+  pendingDue: number;
+  mailboxes: number;
+};
+
+/**
+ * Rows the dispatcher *could* have claimed but did not. A healthy queue keeps
+ * this near zero even with a deep backlog, because a paced row is excluded by
+ * the mailbox gate. A non-zero, aging count means the tick is not running.
+ */
+export async function getScheduledEmailStallStatsPg(input?: {
+  minAgeSeconds?: number;
+}): Promise<ScheduledEmailStallStat[]> {
+  const minAgeSeconds = Math.max(0, Math.floor(input?.minAgeSeconds ?? 300));
+  return withRlsBypass(async (tx) => {
+    const rows = await tx.$queryRaw<
+      Array<{
+        organization_id: string;
+        claimable: bigint;
+        oldest_claimable_age_seconds: number | null;
+        pending_due: bigint;
+        mailboxes: bigint;
+      }>
+    >`
+      SELECT
+        se.organization_id,
+        count(*) FILTER (
+          WHERE (mss.next_available_at IS NULL OR mss.next_available_at <= now())
+            AND COALESCE(se.not_before_at, se.scheduled_at)
+                <= now() - make_interval(secs => ${minAgeSeconds}::double precision)
+        ) AS claimable,
+        max(
+          CASE
+            WHEN (mss.next_available_at IS NULL OR mss.next_available_at <= now())
+            THEN EXTRACT(EPOCH FROM now() - COALESCE(se.not_before_at, se.scheduled_at))
+          END
+        ) AS oldest_claimable_age_seconds,
+        count(*) AS pending_due,
+        count(DISTINCT se.mailbox_id) AS mailboxes
+      FROM scheduled_emails se
+      LEFT JOIN mailbox_send_state mss
+        ON  mss.organization_id   = se.organization_id
+        AND mss.mailbox_owner_uid = se.mailbox_owner_uid
+        AND mss.mailbox_id        = se.mailbox_id
+      WHERE se.status = 'pending'
+        AND COALESCE(se.not_before_at, se.scheduled_at) <= now()
+      GROUP BY se.organization_id
+    `;
+    return rows
+      .map((row) => ({
+        organizationId: row.organization_id,
+        claimable: Number(row.claimable ?? 0),
+        oldestClaimableAgeSeconds: Math.max(
+          0,
+          Math.round(Number(row.oldest_claimable_age_seconds ?? 0)),
+        ),
+        pendingDue: Number(row.pending_due ?? 0),
+        mailboxes: Number(row.mailboxes ?? 0),
+      }))
+      .filter((stat) => stat.claimable > 0);
   });
 }
 

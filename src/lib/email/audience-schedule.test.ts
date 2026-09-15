@@ -134,6 +134,23 @@ describe("defaultAudienceScheduleDatetimeLocal spread", () => {
     expect(slots.size).toBeGreaterThan(50);
   });
 
+  it("keeps a mid-window batch spread instead of collapsing onto now+1m", () => {
+    // 10:00 Sydney, window 9–12: two thirds of the spread offsets land before
+    // "now", so the old clamp gave every email the same 10:01 timestamp.
+    const slots = new Set(
+      Array.from({ length: 200 }, (_, i) =>
+        defaultAudienceScheduleDatetimeLocal({
+          timeZone: "Australia/Sydney",
+          sendWindowStartHour: 9,
+          sendWindowEndHour: 12,
+          now: new Date("2026-07-22T00:00:00.000Z"),
+          spreadKey: `f-${i}`,
+        }),
+      ),
+    );
+    expect(slots.size).toBeGreaterThan(50);
+  });
+
   it("still honours the earliest-allowed time when today's window is partly past", () => {
     // 10:00 Sydney — spread offsets before 10:01 must clamp forward, not go backwards.
     const local = defaultAudienceScheduleDatetimeLocal({

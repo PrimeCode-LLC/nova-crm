@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   dueAtForReschedulePreset,
+  followupSendState,
   formatFollowupDueLabel,
+  formatFollowupQueuedLabel,
+  isFollowupQueuedForSend,
   isFollowupRetryable,
   nextWeekdayYmd,
   planFollowupTryNow,
@@ -62,6 +65,77 @@ describe("isFollowupRetryable", () => {
     expect(
       isFollowupRetryable({ deliveryStatus: "scheduled", scheduledEmailId: "s1" }),
     ).toBe(false);
+  });
+});
+
+describe("followupSendState", () => {
+  const now = new Date("2026-08-04T14:00:00.000Z").getTime();
+
+  it("reports none when no email is linked", () => {
+    expect(followupSendState({}, now)).toBe("none");
+    // A stale id without a scheduled status is not in flight.
+    expect(followupSendState({ scheduledEmailId: "s1" }, now)).toBe("none");
+  });
+
+  it("separates a future send from one waiting on the send gap", () => {
+    expect(
+      followupSendState(
+        {
+          scheduledEmailId: "s1",
+          deliveryStatus: "scheduled",
+          emailScheduledAt: "2026-08-04T14:30:00.000Z",
+        },
+        now,
+      ),
+    ).toBe("queued");
+    expect(
+      followupSendState(
+        {
+          scheduledEmailId: "s1",
+          deliveryStatus: "scheduled",
+          emailScheduledAt: "2026-08-04T13:00:00.000Z",
+        },
+        now,
+      ),
+    ).toBe("queued_late");
+  });
+
+  it("prefers failure states over queued", () => {
+    expect(
+      followupSendState({ scheduledEmailId: "s1", deliveryStatus: "failed" }, now),
+    ).toBe("failed");
+    expect(
+      followupSendState({ scheduledEmailId: "s1", deliveryStatus: "needs_retry" }, now),
+    ).toBe("retrying");
+    expect(
+      isFollowupQueuedForSend({ scheduledEmailId: "s1", deliveryStatus: "failed" }, now),
+    ).toBe(false);
+  });
+});
+
+describe("formatFollowupQueuedLabel", () => {
+  const tz = "America/New_York";
+  const now = new Date("2026-08-04T14:00:00.000Z");
+
+  it("shows the upcoming send time when still ahead", () => {
+    const label = formatFollowupQueuedLabel(
+      "2026-08-04T14:30:00.000Z",
+      "queued",
+      tz,
+      { now },
+    );
+    expect(label).toMatch(/^Sends 10:30\s?AM/i);
+  });
+
+  it("never reads as a stalled task once the send time passes", () => {
+    const label = formatFollowupQueuedLabel(
+      "2026-08-04T12:30:00.000Z",
+      "queued_late",
+      tz,
+      { now },
+    );
+    expect(label).toBe("In send queue · waiting 1h 30m");
+    expect(label).not.toMatch(/ago/);
   });
 });
 

@@ -32,6 +32,7 @@ import {
 } from "@/lib/email/sequence-thread";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import {
+  SCHEDULED_QUOTA_MAX_DEFERRALS,
   SCHEDULED_SEND_MAX_ATTEMPTS,
   classifyScheduledSendError,
   nextRetryAtIso,
@@ -158,6 +159,7 @@ export async function sendClaimedScheduledEmailPg(
     inReplyTo: row.inReplyTo,
     referenceIds: row.referenceIds,
     forceNewThread: row.forceNewThread,
+    quotaDeferrals: row.quotaDeferrals,
   } satisfies ScheduledEmailPayload;
 
   const initialStop = followupId
@@ -270,6 +272,41 @@ export async function sendClaimedScheduledEmailPg(
     dailySendLimit: mailbox.dailySendLimit,
   });
   if (!quota.ok) {
+    const deferrals = Math.max(0, Number(payload.quotaDeferrals ?? 0)) + 1;
+
+    // Quota deferrals never consume a send attempt, so bound them - otherwise a
+    // mailbox that stays over its limit defers this email every day forever and
+    // the followup just looks perpetually due.
+    if (deferrals > SCHEDULED_QUOTA_MAX_DEFERRALS) {
+      const errorText = `Daily send limit reached ${deferrals} days in a row. Raise the mailbox limit or send from another mailbox.`;
+      await updateScheduledEmailPg(organizationId, input.id, {
+        status: "failed",
+        failureKind: "quota",
+        error: errorText,
+        leaseId: null,
+        leaseUntil: null,
+        lastSkipReason: "quota",
+      });
+      if (followupId) {
+        await updateFollowupDeliveryState(followupId, {
+          deliveryStatus: "failed",
+          failedAt: new Date().toISOString(),
+          deliveryError: errorText,
+        });
+      }
+      void recordEmailEvent({
+        organizationId,
+        type: "failed",
+        scheduledEmailId: input.id,
+        followupId: followupId || undefined,
+        leadId: leadId || undefined,
+        mailboxId,
+        recipient: row.to,
+        meta: { quota: true, deferrals, error: errorText },
+      });
+      return { outcome: "failed", detail: errorText };
+    }
+
     const orgTimeZone = await getOrgTimezoneServer(organizationId);
     const deferAt = nextZonedDayStartIso(new Date(), orgTimeZone);
     await releaseClaimToPendingPg({
@@ -280,8 +317,16 @@ export async function sendClaimedScheduledEmailPg(
       failureKind: "quota",
       error: quota.error,
       lastSkipReason: "quota",
-      payload: { ...payload, nextRetryAt: deferAt },
+      payload: { ...payload, nextRetryAt: deferAt, quotaDeferrals: deferrals },
     });
+    // Keep the followup's displayed send time honest about the deferral.
+    if (followupId) {
+      await updateFollowupDeliveryState(followupId, {
+        deliveryStatus: "scheduled",
+        emailScheduledAt: deferAt,
+        deliveryError: quota.error,
+      });
+    }
     return { outcome: "skipped", reason: "quota", detail: quota.error };
   }
 
@@ -457,6 +502,7 @@ export async function sendClaimedScheduledEmailPg(
         inReplyTo,
         referenceIds,
         nextRetryAt: undefined,
+        quotaDeferrals: undefined,
       },
     });
     await markMailboxSentPg({
@@ -480,6 +526,7 @@ export async function sendClaimedScheduledEmailPg(
         sentAt: now,
         ...(messageId ? { sentMessageId: messageId } : {}),
         completedAt: now,
+        deliveryError: FieldValue.delete(),
         scheduledEmailId: FieldValue.delete(),
         emailScheduledAt: FieldValue.delete(),
         mailboxId,

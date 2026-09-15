@@ -214,6 +214,8 @@ export interface ScheduledEmail {
   attempts?: number;
   /** ISO when the next auto-retry should run (status stays pending). */
   nextRetryAt?: string;
+  /** Consecutive daily-quota deferrals (does not consume a send attempt). */
+  quotaDeferrals?: number;
   failureKind?: ScheduledEmailFailureKind;
 }
 

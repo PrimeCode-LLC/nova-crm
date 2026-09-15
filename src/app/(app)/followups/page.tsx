@@ -79,8 +79,8 @@ import {
 } from "@/lib/owner-scope";
 import {
   isFollowupDeliveryIssue,
+  isFollowupQueuedForSend,
   planFollowupTryNow,
-  tryNowDueAtIso,
   tryNowScheduleAtIso,
 } from "@/lib/followup-due-display";
 import { Input } from "@/components/ui/input";
@@ -624,11 +624,14 @@ export default function FollowupsPage() {
   ) {
     let scheduled = 0;
     let retried = 0;
-    let bumped = 0;
     let skipped = 0;
     let scheduleIndex = 0;
     const now = Date.now();
     const total = targets.length;
+    // Reasons a followup could not be sent. Try now must never silently bump the
+    // due date instead - that just re-arms the same row a minute later.
+    const blocked = new Map<string, number>();
+    const block = (reason: string) => blocked.set(reason, (blocked.get(reason) ?? 0) + 1);
 
     for (let i = 0; i < targets.length; i++) {
       const raw = targets[i]!;
@@ -640,6 +643,13 @@ export default function FollowupsPage() {
         const f = await hydrateFollowupMessageBody(raw);
         const lead = f.leadId ? ws.getLeadById(f.leadId) : undefined;
         const plan = planFollowupTryNow(f, lead?.channel);
+
+        // Re-queueing an email that is already waiting on the mailbox send gap
+        // cancels it and puts it at the back of the line, so leave it alone.
+        if (plan.kind !== "retry" && isFollowupQueuedForSend(f)) {
+          block("already queued to send");
+          continue;
+        }
 
         if (plan.kind === "retry") {
           if (!f.scheduledEmailId) {
@@ -688,26 +698,7 @@ export default function FollowupsPage() {
 
         if (plan.kind === "schedule") {
           if (!lead || !sendableMailbox) {
-            // Fall back to due bump when we cannot send.
-            const dueAt = tryNowDueAtIso(now);
-            if (f.scheduledEmailId) {
-              const cancel = await cancelScheduledEmailClient({
-                scheduledEmailId: f.scheduledEmailId,
-                isDemo,
-                cancelDemo: cancelScheduled,
-                followupId: f.id,
-                selfUid: currentUserId,
-                mailViewAsUid,
-                activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
-              });
-              if ("error" in cancel) {
-                skipped += 1;
-                continue;
-              }
-              clearFollowupEmailSchedule(f.id);
-            }
-            updateFollowup(f.id, { dueAt });
-            bumped += 1;
+            block(lead ? "no connected mailbox to send from" : "lead not found");
             continue;
           }
 
@@ -720,7 +711,7 @@ export default function FollowupsPage() {
               ? rememberedTo
               : defaultContactRecipientEmail(recipientOptions);
           if (!to) {
-            skipped += 1;
+            block("no recipient email on the contact");
             continue;
           }
 
@@ -772,25 +763,13 @@ export default function FollowupsPage() {
           continue;
         }
 
-        // bump_due
-        if (f.scheduledEmailId) {
-          const cancel = await cancelScheduledEmailClient({
-            scheduledEmailId: f.scheduledEmailId,
-            isDemo,
-            cancelDemo: cancelScheduled,
-            followupId: f.id,
-            selfUid: currentUserId,
-            mailViewAsUid,
-            activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
-          });
-          if ("error" in cancel) {
-            skipped += 1;
-            continue;
-          }
-          clearFollowupEmailSchedule(f.id);
-        }
-        updateFollowup(f.id, { dueAt: tryNowDueAtIso(now) });
-        bumped += 1;
+        // Nothing to send: no message body, or not an email step. Bumping the due
+        // date by a minute would only re-arm the same row, so say why instead.
+        block(
+          f.messageBody?.trim() || f.hasMessageBody
+            ? "not an email step - use Reschedule"
+            : "no email body written yet",
+        );
       } finally {
         onProgress?.(i + 1, total);
       }
@@ -799,9 +778,14 @@ export default function FollowupsPage() {
     const parts: string[] = [];
     if (scheduled > 0) parts.push(`${scheduled} queued to send`);
     if (retried > 0) parts.push(`${retried} retried`);
-    if (bumped > 0) parts.push(`${bumped} due now`);
     if (parts.length > 0) {
       toast.success(parts.join(" · "));
+    }
+    if (blocked.size > 0) {
+      const detail = [...blocked.entries()]
+        .map(([reason, count]) => `${count} ${reason}`)
+        .join(" · ");
+      toast.warning("Nothing was sent for some followups", { description: detail });
     }
     if (skipped > 0) {
       toast.error(
@@ -1528,8 +1512,8 @@ export default function FollowupsPage() {
               {selectedNonEmailCount > 0
                 ? ` (${selectedNonEmailCount} LinkedIn/other skipped)`
                 : ""}
-              . Email-ready steps send shortly (staggered). Failed sends are retried. Large batches
-              may hit daily send limits.
+              . Email-ready steps send shortly (staggered). Failed sends are retried. Steps already
+              queued are left in the send queue. Large batches may hit daily send limits.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
