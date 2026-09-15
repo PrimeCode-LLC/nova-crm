@@ -1,12 +1,27 @@
 # CI — production branch: feature/remove-firebase (PostgreSQL/VPS)
 # main is Firebase reference only — no production CI/CD from main.
+#
+# Speed model:
+# - PRs: checks + migrate-smoke only (no full image matrix; Next build covers app compile)
+# - Push: checks + migrate-smoke + parallel GHCR publish (Buildx GHA cache) + deploy
+# - Never build the same Docker image twice in one pipeline
 name: CI
 
 on:
   pull_request:
     branches: [feature/remove-firebase]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".cursor/**"
+      - "Architecture fixes plan/**"
   push:
     branches: [feature/remove-firebase]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".cursor/**"
+      - "Architecture fixes plan/**"
 
 concurrency:
   # Supersede PR runs freely, but never cancel a production-branch run — it can
@@ -16,11 +31,13 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
+  # build-push-action@v6 defaults provenance on; GHCR then fails with "unknown blob".
+  BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
 
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -55,17 +72,38 @@ jobs:
       - name: Validate cron configuration
         run: node scripts/validate-cron-config.mjs
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
+      # Lint and typecheck are independent after npm ci — run in parallel.
+      - name: Lint + typecheck
+        run: |
+          set -euo pipefail
+          npm run lint &
+          lint_pid=$!
+          npm run typecheck &
+          tsc_pid=$!
+          lint_status=0
+          tsc_status=0
+          wait "$lint_pid" || lint_status=$?
+          wait "$tsc_pid" || tsc_status=$?
+          if [ "$lint_status" -ne 0 ] || [ "$tsc_status" -ne 0 ]; then
+            echo "lint exit=${lint_status} typecheck exit=${tsc_status}" >&2
+            exit 1
+          fi
 
       - name: Migrate Postgres (P2+)
         run: npm run db:migrate:deploy
 
       - name: Test
         run: npm run test
+
+      - name: Restore Next.js cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('src/**/*.{ts,tsx,js,jsx}', 'next.config.*') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-
 
       - name: Build
         run: npm run build
@@ -78,32 +116,11 @@ jobs:
           CLERK_SECRET_KEY: sk_test_ci
           DATABASE_URL: postgres://nova_app:nova_dev_password@localhost:5432/nova_crm
           REDIS_URL: redis://localhost:6379
-
-  docker-images:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build web image
-        run: |
-          docker build -t nova-crm-web -f Dockerfile . \
-            --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_ci \
-            --build-arg NEXT_PUBLIC_AUTH_CLERK_V1=true \
-            --build-arg NEXT_PUBLIC_SITE_URL=https://ci.example.com \
-            --build-arg NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true \
-            --build-arg NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true \
-            --build-arg NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true \
-            --build-arg NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
-      - name: Build worker image
-        run: docker build -t nova-crm-worker -f Dockerfile.worker .
-      - name: Build migrate image
-        run: docker build -t nova-crm-migrate -f Dockerfile.migrate .
-      - name: Build cron sidecar image
-        run: docker build -t nova-crm-cron -f docker/cron/Dockerfile .
+          NEXT_TELEMETRY_DISABLED: "1"
 
   migrate-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -121,12 +138,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build migrate image
-        run: docker build -t nova-crm-migrate -f Dockerfile.migrate .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build migrate image (cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.migrate
+          push: false
+          load: true
+          tags: nova-crm-migrate:ci
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,mode=max,scope=migrate
 
       - name: Fail fast when required env is missing
         run: |
-          if docker run --rm --network host nova-crm-migrate 2>/dev/null; then
+          if docker run --rm --network host nova-crm-migrate:ci 2>/dev/null; then
             echo "expected failure when MIGRATE_DATABASE_URL/NOVA_APP_PASSWORD unset"
             exit 1
           fi
@@ -136,26 +166,44 @@ jobs:
           docker run --rm --network host \
             -e MIGRATE_DATABASE_URL=postgres://nova:nova_dev_password@localhost:5432/nova_crm \
             -e NOVA_APP_PASSWORD="ci-p@ss'w0rd\$x" \
-            nova-crm-migrate
+            nova-crm-migrate:ci
 
       - name: Verify nova_app authenticates with the new password
-        env:
-          PGPASSWORD: "ci-p@ss'w0rd$x"
-        run: psql -h localhost -U nova_app -d nova_crm -c "select current_user;"
+        run: |
+          docker run --rm --network host \
+            -e PGPASSWORD="ci-p@ss'w0rd\$x" \
+            postgres:16-alpine \
+            psql -h localhost -U nova_app -d nova_crm -c "select current_user;"
 
+  # One build per image, in parallel, with GHA layer cache. Replaces the old
+  # docker-images job that rebuilt everything a second time before publish.
   publish-ghcr:
     if: github.event_name == 'push' && github.ref == 'refs/heads/feature/remove-firebase'
-    needs: [checks, docker-images, migrate-smoke]
+    needs: [checks, migrate-smoke]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: web
+            file: Dockerfile
+            cache_scope: web
+          - image: worker
+            file: Dockerfile.worker
+            cache_scope: worker
+          - image: migrate
+            file: Dockerfile.migrate
+            cache_scope: migrate
+          - image: cron
+            file: docker/cron/Dockerfile
+            cache_scope: cron
     env:
       WEB_CLERK_PK: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_test_ci' }}
       WEB_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://ci.example.com' }}
-      # build-push-action@v6 defaults provenance on; GHCR then fails with "unknown blob".
-      BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -173,53 +221,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push web image
+      - name: Build and push ${{ matrix.image }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
+          file: ${{ matrix.file }}
           push: true
           provenance: false
           sbom: false
-          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-web:${{ github.sha }}
-          build-args: |
-            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ env.WEB_CLERK_PK }}
-            NEXT_PUBLIC_AUTH_CLERK_V1=true
-            NEXT_PUBLIC_SITE_URL=${{ env.WEB_SITE_URL }}
-            NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true
-            NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
-            NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
-            NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
-
-      - name: Build and push worker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.worker
-          push: true
-          provenance: false
-          sbom: false
-          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-worker:${{ github.sha }}
-
-      - name: Build and push migrate image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.migrate
-          push: true
-          provenance: false
-          sbom: false
-          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-migrate:${{ github.sha }}
-
-      - name: Build and push cron image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/cron/Dockerfile
-          push: true
-          provenance: false
-          sbom: false
-          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-cron:${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+          build-args: ${{ matrix.image == 'web' && format('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY={0}
+NEXT_PUBLIC_AUTH_CLERK_V1=true
+NEXT_PUBLIC_SITE_URL={1}
+NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true
+NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
+NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
+NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true', env.WEB_CLERK_PK, env.WEB_SITE_URL) || '' }}
 
   # Continuous delivery: a green push to feature/remove-firebase deploys the exact
   # SHA whose images publish-ghcr just pushed. `environment: production` is required
