@@ -34,46 +34,76 @@ export function isArrayRemove(v: unknown): v is ArrayRemoveSentinel {
   return typeof v === "object" && v !== null && "__arrayRemove" in v;
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Apply a single FieldValue / literal at a dotted path (`counts.created`).
+ * Nested parents are shallow-cloned so sibling keys are preserved.
+ */
+function applyValueAtPath(
+  root: Record<string, unknown>,
+  path: string[],
+  value: unknown,
+): void {
+  let cur = root;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const seg = path[i]!;
+    const next = cur[seg];
+    if (!isPlainObject(next)) {
+      cur[seg] = {};
+    } else {
+      cur[seg] = { ...next };
+    }
+    cur = cur[seg] as Record<string, unknown>;
+  }
+  const leaf = path[path.length - 1]!;
+  if (isFieldDelete(value)) {
+    delete cur[leaf];
+    return;
+  }
+  if (isServerTimestamp(value)) {
+    cur[leaf] = new Date();
+    return;
+  }
+  if (isIncrement(value)) {
+    const curVal = typeof cur[leaf] === "number" ? (cur[leaf] as number) : 0;
+    cur[leaf] = curVal + value.__increment;
+    return;
+  }
+  if (isArrayUnion(value)) {
+    const list = Array.isArray(cur[leaf]) ? [...(cur[leaf] as unknown[])] : [];
+    for (const item of value.__arrayUnion) {
+      if (!list.some((x) => JSON.stringify(x) === JSON.stringify(item))) {
+        list.push(item);
+      }
+    }
+    cur[leaf] = list;
+    return;
+  }
+  if (isArrayRemove(value)) {
+    const list = Array.isArray(cur[leaf]) ? [...(cur[leaf] as unknown[])] : [];
+    cur[leaf] = list.filter(
+      (item) =>
+        !value.__arrayRemove.some(
+          (r) => JSON.stringify(r) === JSON.stringify(item),
+        ),
+    );
+    return;
+  }
+  cur[leaf] = value;
+}
+
 export function applyFieldValues(
   existing: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
   const out = { ...existing };
   for (const [key, value] of Object.entries(patch)) {
-    if (isFieldDelete(value)) {
-      delete out[key];
-      continue;
-    }
-    if (isServerTimestamp(value)) {
-      out[key] = new Date();
-      continue;
-    }
-    if (isIncrement(value)) {
-      const cur = typeof out[key] === "number" ? (out[key] as number) : 0;
-      out[key] = cur + value.__increment;
-      continue;
-    }
-    if (isArrayUnion(value)) {
-      const cur = Array.isArray(out[key]) ? [...(out[key] as unknown[])] : [];
-      for (const item of value.__arrayUnion) {
-        if (!cur.some((x) => JSON.stringify(x) === JSON.stringify(item))) {
-          cur.push(item);
-        }
-      }
-      out[key] = cur;
-      continue;
-    }
-    if (isArrayRemove(value)) {
-      const cur = Array.isArray(out[key]) ? [...(out[key] as unknown[])] : [];
-      out[key] = cur.filter(
-        (item) =>
-          !value.__arrayRemove.some(
-            (r) => JSON.stringify(r) === JSON.stringify(item),
-          ),
-      );
-      continue;
-    }
-    out[key] = value;
+    const path = key.split(".").filter(Boolean);
+    if (path.length === 0) continue;
+    applyValueAtPath(out, path, value);
   }
   return out;
 }
@@ -81,18 +111,8 @@ export function applyFieldValues(
 export function resolveWriteData(
   data: Record<string, unknown>,
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (isFieldDelete(value)) continue;
-    if (isServerTimestamp(value)) {
-      out[key] = new Date();
-    } else if (isIncrement(value)) {
-      out[key] = value.__increment;
-    } else {
-      out[key] = value;
-    }
-  }
-  return out;
+  // Expand dotted keys so set({ "counts.created": 1 }) nests under counts.
+  return applyFieldValues({}, data);
 }
 
 export type VectorSentinel = { __vector: number[] };

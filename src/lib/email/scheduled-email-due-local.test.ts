@@ -96,6 +96,14 @@ vi.mock("@/lib/email/mailbox-profiles-server", () => ({
 
 vi.mock("@/lib/email/mailbox-send-quota-server", () => ({
   assertMailboxDailySendQuotaServer: vi.fn(async () => ({ ok: true as const })),
+  reserveMailboxDailySendServer: vi.fn(async () => ({
+    ok: true as const,
+    used: 1,
+    limit: null,
+    remaining: null,
+  })),
+  releaseMailboxDailySendServer: vi.fn(async () => undefined),
+  releaseMailboxScheduleSlotServer: vi.fn(async () => undefined),
   getMailboxLastSentAtServer: vi.fn(async () => null),
   incrementMailboxSendCountServer: vi.fn(async () => undefined),
 }));

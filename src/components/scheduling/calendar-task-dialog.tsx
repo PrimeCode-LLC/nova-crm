@@ -67,8 +67,16 @@ export function CalendarTaskDialog({
   const [priority, setPriority] = React.useState<LeadPriority>("medium");
   const [saving, setSaving] = React.useState(false);
 
+  // Seed once per open — calendar refresh must not wipe the task the user is drafting.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     const base = initialDate ?? new Date();
     setTitle("");
     setDescription("");

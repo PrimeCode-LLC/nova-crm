@@ -78,8 +78,16 @@ export function SwitchLeadContactDialog({
   const [personalEmail, setPersonalEmail] = React.useState("");
   const [linkedin, setLinkedin] = React.useState("");
 
+  // Seed once per open — sibling list / resume flag churn must not wipe create-mode fields.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     const nextMode: Mode = siblings.length > 0 ? "pick" : "create";
     setMode(nextMode);
     setSelectedId(siblings[0]?.id ?? "");
@@ -92,7 +100,6 @@ export function SwitchLeadContactDialog({
     setPersonalEmail("");
     setLinkedin("");
     setBusy(false);
-    // Only reset form when the dialog opens (or account/contact context changes).
     // eslint-disable-next-line react-hooks/exhaustive-deps -- siblings identity changes every render
   }, [open, lead.id, lead.contactId, lead.personaId, account.id, canResumeSequence, siblings.length]);
 

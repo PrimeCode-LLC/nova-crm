@@ -57,8 +57,16 @@ export function UpdateContactEmailDialog({
   const [resumeSequence, setResumeSequence] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
 
+  // Seed once per open — prop churn must not wipe the address the user is typing.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     setField("email");
     setNextEmail(suggestedEmail?.trim() || "");
     setResumeSequence(canResumeSequence);

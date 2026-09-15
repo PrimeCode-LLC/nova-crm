@@ -8,8 +8,8 @@ import { outboundAttachmentsToLeadMail } from "@/lib/email/lead-mail-attachments
 import { parseOutboundAttachments } from "@/lib/email/outbound-attachments";
 import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 import {
-  assertMailboxDailySendQuotaServer,
-  incrementMailboxSendCountServer,
+  reserveMailboxDailySendServer,
+  releaseMailboxDailySendServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
@@ -106,6 +106,8 @@ export async function POST(req: Request) {
     let connectionType: string | undefined;
     let trackOpens = false;
     let trackClicks = false;
+    let reservedSend = false;
+    let reservedMailboxId = "";
     if (mailboxId) {
       const profile = await getMailboxProfileServer({
         organizationId: g.ctx.session.organizationId,
@@ -115,7 +117,7 @@ export async function POST(req: Request) {
       connectionType = profile?.connectionType;
       trackOpens = Boolean(profile?.readReceipts);
       trackClicks = Boolean(profile?.trackClicks);
-      const quota = await assertMailboxDailySendQuotaServer({
+      const quota = await reserveMailboxDailySendServer({
         organizationId: g.ctx.session.organizationId,
         uid: dataOwnerUid,
         mailboxId,
@@ -127,6 +129,8 @@ export async function POST(req: Request) {
           { status: quota.status },
         );
       }
+      reservedSend = true;
+      reservedMailboxId = mailboxId;
     }
 
     const imapHost = normalizeMailHost(String(imap?.host ?? ""));
@@ -168,15 +172,14 @@ export async function POST(req: Request) {
     });
 
     if (!result.ok) {
+      if (reservedSend && reservedMailboxId) {
+        await releaseMailboxDailySendServer({
+          organizationId: g.ctx.session.organizationId,
+          uid: dataOwnerUid,
+          mailboxId: reservedMailboxId,
+        }).catch(() => null);
+      }
       return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
-    }
-
-    if (mailboxId) {
-      await incrementMailboxSendCountServer({
-        organizationId: g.ctx.session.organizationId,
-        uid: dataOwnerUid,
-        mailboxId,
-      });
     }
 
     if (leadId && mailboxId) {

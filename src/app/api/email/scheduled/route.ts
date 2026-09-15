@@ -6,7 +6,7 @@ import {
   listScheduledEmailsForMemberServer,
 } from "@/lib/email/scheduled-emails-server";
 import { getMailboxProfileServer } from "@/lib/email/mailbox-profiles-server";
-import { assertMailboxScheduleDayQuotaServer } from "@/lib/email/mailbox-send-quota-server";
+import { reserveMailboxScheduleSlotServer } from "@/lib/email/mailbox-send-quota-server";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 
@@ -102,7 +102,7 @@ export async function POST(req: Request) {
     uid: resolved.dataOwnerUid,
     mailboxId,
   });
-  const scheduleQuota = await assertMailboxScheduleDayQuotaServer({
+  const scheduleQuota = await reserveMailboxScheduleSlotServer({
     organizationId: g.ctx.session.organizationId,
     uid: resolved.dataOwnerUid,
     mailboxId,
@@ -152,6 +152,15 @@ export async function POST(req: Request) {
   });
 
   if ("error" in result) {
+    const { releaseMailboxScheduleSlotServer } = await import(
+      "@/lib/email/mailbox-send-quota-server"
+    );
+    await releaseMailboxScheduleSlotServer({
+      organizationId: g.ctx.session.organizationId,
+      uid: resolved.dataOwnerUid,
+      mailboxId,
+      scheduledAt,
+    }).catch(() => null);
     return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
   }
 

@@ -1,6 +1,5 @@
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
-import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { addUtcDayKey } from "@/lib/email/mailbox-schedule-capacity";
 import {
   resolveOrgTimezone,
@@ -385,7 +384,79 @@ export async function getMailboxLastSentAtServer(input: {
   return typeof last === "string" && last.trim() ? last.trim() : undefined;
 }
 
-export async function incrementMailboxSendCountServer(input: {
+/**
+ * Atomically reserve one send against today's mailbox limit (increment `count`
+ * only if still under the ceiling). Call this *before* SMTP; release on failure.
+ */
+export async function reserveMailboxDailySendServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  dailySendLimit: number | null | undefined;
+  timeZone?: string;
+}): Promise<MailboxQuotaCheck> {
+  if (!input.mailboxId.trim()) {
+    return { ok: true, used: 0, limit: null, remaining: null };
+  }
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
+  const limit = normalizeDailyLimit(input.dailySendLimit);
+  const dayKey = sendDayKey(new Date(), zone);
+  const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
+  if (!ref) return { ok: true, used: 0, limit: limit, remaining: limit };
+  const db = getAdminDb();
+  if (!db) return { ok: true, used: 0, limit: limit, remaining: limit };
+
+  try {
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const used = Math.max(
+        0,
+        Number((snap.data() as { count?: unknown } | undefined)?.count ?? 0),
+      );
+      if (limit != null && used >= limit) {
+        throw Object.assign(
+          new Error(
+            `Daily send limit reached (${used}/${limit}). Try again after midnight (${zone}).`,
+          ),
+          { used, limit, status: 429 as const },
+        );
+      }
+      const now = new Date().toISOString();
+      tx.set(
+        ref,
+        {
+          count: used + 1,
+          dayKey,
+          timeZone: zone,
+          lastSentAt: now,
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+      return {
+        ok: true as const,
+        used: used + 1,
+        limit,
+        remaining: limit == null ? null : Math.max(0, limit - used - 1),
+      };
+    });
+  } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "status" in err &&
+      (err as { status?: number }).status === 429
+    ) {
+      const e = err as unknown as { message: string; used: number; limit: number };
+      return { ok: false, error: e.message, used: e.used, limit: e.limit, status: 429 };
+    }
+    throw err;
+  }
+}
+
+/** Undo a {@link reserveMailboxDailySendServer} after a failed send. */
+export async function releaseMailboxDailySendServer(input: {
   organizationId: string;
   uid: string;
   mailboxId: string;
@@ -397,15 +468,233 @@ export async function incrementMailboxSendCountServer(input: {
   const dayKey = sendDayKey(new Date(), zone);
   const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
   if (!ref) return;
-  const now = new Date().toISOString();
-  await ref.set(
-    {
-      count: FieldValue.increment(1),
-      dayKey,
-      timeZone: zone,
-      lastSentAt: now,
-      updatedAt: now,
-    },
-    { merge: true },
-  );
+  const db = getAdminDb();
+  if (!db) return;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const used = Math.max(
+      0,
+      Number((snap.data() as { count?: unknown } | undefined)?.count ?? 0),
+    );
+    tx.set(
+      ref,
+      {
+        count: Math.max(0, used - 1),
+        dayKey,
+        timeZone: zone,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+  });
 }
+
+/**
+ * Atomically book one schedule slot for a mailbox calendar day.
+ * Uses max(scheduledBooked, livePending) so pre-existing pending rows still
+ * count against the limit while the booked counter serializes concurrent creates.
+ */
+export async function reserveMailboxScheduleSlotServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  dailySendLimit: number | null | undefined;
+  scheduledAt: Date | string;
+  timeZone?: string;
+}): Promise<
+  | { ok: true; dayKey: string; used: number; limit: number | null; remaining: number | null }
+  | {
+      ok: false;
+      error: string;
+      dayKey: string;
+      used: number;
+      limit: number;
+      remaining: number;
+      status: 429;
+    }
+> {
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
+  const limit = normalizeDailyLimit(input.dailySendLimit);
+  const scheduledDate =
+    input.scheduledAt instanceof Date ? input.scheduledAt : new Date(input.scheduledAt);
+  const dayKey = sendDayKey(scheduledDate, zone);
+  const todayKey = sendDayKey(new Date(), zone);
+
+  if (limit == null || !input.mailboxId.trim()) {
+    const orgOnly = await assertOrgScheduleDayCeilingServer({
+      organizationId: input.organizationId,
+      scheduledAt: scheduledDate,
+      timeZone: zone,
+    });
+    if (!orgOnly.ok) {
+      return {
+        ok: false,
+        error: orgOnly.error,
+        dayKey: orgOnly.dayKey,
+        used: orgOnly.used,
+        limit: orgOnly.ceiling,
+        remaining: 0,
+        status: 429,
+      };
+    }
+    return { ok: true, dayKey, used: 0, limit: null, remaining: null };
+  }
+
+  const [sent, pendingByDay] = await Promise.all([
+    dayKey === todayKey
+      ? getMailboxSendCountForDayServer({
+          organizationId: input.organizationId,
+          uid: input.uid,
+          mailboxId: input.mailboxId,
+          dayKey,
+          timeZone: zone,
+        })
+      : Promise.resolve(0),
+    countPendingScheduledByUtcDayServer({
+      organizationId: input.organizationId,
+      uid: input.uid,
+      mailboxId: input.mailboxId,
+      fromDayKey: dayKey,
+      toDayKey: dayKey,
+      timeZone: zone,
+    }),
+  ]);
+  const pendingLive = pendingByDay[dayKey] ?? 0;
+
+  const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
+  const db = getAdminDb();
+  if (!ref || !db) {
+    // No store — fall back to soft check only.
+    const used = sent + pendingLive;
+    if (used >= limit) {
+      return {
+        ok: false,
+        error: `Daily send limit full for ${dayKey} (${used}/${limit} booked). Pick another day or mailbox.`,
+        dayKey,
+        used,
+        limit,
+        remaining: 0,
+        status: 429,
+      };
+    }
+    return { ok: true, dayKey, used, limit, remaining: Math.max(0, limit - used) };
+  }
+
+  try {
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const data = (snap.data() ?? {}) as {
+        count?: unknown;
+        scheduledBooked?: unknown;
+      };
+      const sentCount =
+        dayKey === todayKey
+          ? Math.max(sent, Math.max(0, Number(data.count ?? 0)))
+          : Math.max(0, Number(data.count ?? 0));
+      const booked = Math.max(0, Number(data.scheduledBooked ?? 0));
+      const used = Math.max(sentCount + booked, sentCount + pendingLive);
+      if (used >= limit) {
+        throw Object.assign(
+          new Error(
+            `Daily send limit full for ${dayKey} (${used}/${limit} booked). Pick another day or mailbox.`,
+          ),
+          { used, limit, dayKey, status: 429 as const },
+        );
+      }
+      tx.set(
+        ref,
+        {
+          dayKey,
+          timeZone: zone,
+          scheduledBooked: booked + 1,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+      return {
+        ok: true as const,
+        dayKey,
+        used: used + 1,
+        limit,
+        remaining: Math.max(0, limit - used - 1),
+      };
+    });
+  } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "status" in err &&
+      (err as { status?: number }).status === 429
+    ) {
+      const e = err as unknown as {
+        message: string;
+        used: number;
+        limit: number;
+        dayKey: string;
+      };
+      return {
+        ok: false,
+        error: e.message,
+        dayKey: e.dayKey,
+        used: e.used,
+        limit: e.limit,
+        remaining: 0,
+        status: 429,
+      };
+    }
+    throw err;
+  }
+}
+
+/** Undo a {@link reserveMailboxScheduleSlotServer} (cancel / create failure). */
+export async function releaseMailboxScheduleSlotServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  scheduledAt: Date | string;
+  timeZone?: string;
+}): Promise<void> {
+  if (!input.mailboxId.trim()) return;
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
+  const when =
+    input.scheduledAt instanceof Date ? input.scheduledAt : new Date(input.scheduledAt);
+  if (Number.isNaN(when.getTime())) return;
+  const dayKey = sendDayKey(when, zone);
+  const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
+  if (!ref) return;
+  const db = getAdminDb();
+  if (!db) return;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const booked = Math.max(
+      0,
+      Number((snap.data() as { scheduledBooked?: unknown } | undefined)?.scheduledBooked ?? 0),
+    );
+    tx.set(
+      ref,
+      {
+        dayKey,
+        timeZone: zone,
+        scheduledBooked: Math.max(0, booked - 1),
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+  });
+}
+
+/** @deprecated Prefer {@link reserveMailboxDailySendServer} before SMTP. */
+export async function incrementMailboxSendCountServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  timeZone?: string;
+}): Promise<void> {
+  await reserveMailboxDailySendServer({
+    ...input,
+    dailySendLimit: null,
+  });
+}
+

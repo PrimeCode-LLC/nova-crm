@@ -11,8 +11,8 @@ import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-
 import { getLeadMailMessageServer } from "@/lib/email/lead-mail-store-server";
 import { getEmailAccountMetaServer, getMailboxProfileServer, listMailboxesForMemberServer } from "@/lib/email/mailbox-profiles-server";
 import {
-  assertMailboxDailySendQuotaServer,
-  incrementMailboxSendCountServer,
+  reserveMailboxDailySendServer,
+  releaseMailboxDailySendServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
 import { recordEmailSendEventServer } from "@/lib/email/record-email-send-event-server";
@@ -178,7 +178,7 @@ export async function sendReplyActionServer(input: {
     return { ok: false, error: "Mailbox is not ready to send.", status: 409 };
   }
 
-  const quota = await assertMailboxDailySendQuotaServer({
+  const quota = await reserveMailboxDailySendServer({
     organizationId: input.organizationId,
     uid: resolved.ownerUid,
     mailboxId: resolved.mailboxId,
@@ -265,6 +265,11 @@ export async function sendReplyActionServer(input: {
   });
 
   if (!result.ok) {
+    await releaseMailboxDailySendServer({
+      organizationId: input.organizationId,
+      uid: resolved.ownerUid,
+      mailboxId: resolved.mailboxId,
+    }).catch(() => null);
     return { ok: false, error: result.error, status: 400 };
   }
 
@@ -355,16 +360,6 @@ export async function sendReplyActionServer(input: {
       messageId,
       subject,
       writeTimeline: false,
-    });
-  } catch {
-    /* send already succeeded */
-  }
-
-  try {
-    await incrementMailboxSendCountServer({
-      organizationId: input.organizationId,
-      uid: resolved.ownerUid,
-      mailboxId: resolved.mailboxId,
     });
   } catch {
     /* send already succeeded */

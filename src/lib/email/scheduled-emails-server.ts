@@ -20,9 +20,10 @@ import {
   findMailboxHostInOrgServer,
 } from "@/lib/email/mailbox-profiles-server";
 import {
-  assertMailboxDailySendQuotaServer,
+  reserveMailboxDailySendServer,
+  releaseMailboxDailySendServer,
+  releaseMailboxScheduleSlotServer,
   getMailboxLastSentAtServer,
-  incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 import { outboundAttachmentsToLeadMail } from "@/lib/email/lead-mail-attachments";
@@ -1115,7 +1116,7 @@ async function sendScheduledDoc(
     }
   }
 
-  const quota = await assertMailboxDailySendQuotaServer({
+  const quota = await reserveMailboxDailySendServer({
     organizationId,
     uid: mailboxOwnerUid,
     mailboxId,
@@ -1389,7 +1390,12 @@ async function sendScheduledDoc(
       }
     }
     try {
-      await incrementMailboxSendCountServer({ organizationId, uid: mailboxOwnerUid, mailboxId });
+      await releaseMailboxScheduleSlotServer({
+        organizationId,
+        uid: mailboxOwnerUid,
+        mailboxId,
+        scheduledAt: String(data.scheduledAt ?? now),
+      });
     } catch {
       /* Delivery is authoritative; quota accounting can recover independently. */
     }
@@ -1400,6 +1406,12 @@ async function sendScheduledDoc(
   }
 
   console.error(`[scheduled-send] FAILURE: Outbound send returned error for doc "${docRef.id}": ${result.error}`);
+
+  await releaseMailboxDailySendServer({
+    organizationId,
+    uid: mailboxOwnerUid,
+    mailboxId,
+  }).catch(() => null);
 
   const attempts = Math.max(0, Number(data.attempts ?? 0)) + 1;
   const kind = classifyScheduledSendError(result.error);

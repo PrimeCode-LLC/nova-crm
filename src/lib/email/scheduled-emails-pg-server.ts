@@ -25,6 +25,7 @@ import {
   retryScheduledEmailPg,
   type ScheduledEmailPayload,
 } from "@/lib/email/scheduled-emails-repo";
+import { releaseMailboxScheduleSlotServer } from "@/lib/email/mailbox-send-quota-server";
 import type {
   ScheduledFlushRowResult,
   ScheduledSkipReason,
@@ -66,6 +67,12 @@ async function supersedeStaleScheduledEmail(input: {
     organizationId: input.organizationId,
     scheduledAt: new Date(existing.scheduledAt),
     delta: -1,
+  }).catch(() => null);
+  await releaseMailboxScheduleSlotServer({
+    organizationId: input.organizationId,
+    uid: existing.mailboxOwnerUid,
+    mailboxId: existing.mailboxId,
+    scheduledAt: existing.scheduledAt,
   }).catch(() => null);
   return { ok: true };
 }
@@ -308,6 +315,12 @@ export async function cancelScheduledEmailPgServer(input: {
           organizationId: input.organizationId,
           scheduledAt: new Date(row.scheduledAt),
           delta: -1,
+        }).catch(() => null);
+        await releaseMailboxScheduleSlotServer({
+          organizationId: input.organizationId,
+          uid: memberUid,
+          mailboxId: row.mailboxId,
+          scheduledAt: row.scheduledAt,
         }).catch(() => null);
       }
       const followupId =

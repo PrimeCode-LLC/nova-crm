@@ -37,8 +37,16 @@ export function CreateVariantDialog(props: {
   const [notes, setNotes] = React.useState("");
   const [busy, setBusy] = React.useState(false);
 
+  // Seed once per open — parent list refresh must not wipe prompt edits.
+  const seededRef = React.useRef(false);
+
   React.useEffect(() => {
-    if (!parent || !open) return;
+    if (!parent || !open) {
+      if (!open) seededRef.current = false;
+      return;
+    }
+    if (seededRef.current) return;
+    seededRef.current = true;
     setLabel(`${parent.label} · variant`);
     setSystemPrompt(parent.systemPrompt);
     setUserPromptTemplate(parent.userPromptTemplate);

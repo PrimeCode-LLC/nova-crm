@@ -17,8 +17,9 @@ import {
   findMailboxHostInOrgServer,
 } from "@/lib/email/mailbox-profiles-server";
 import {
-  assertMailboxDailySendQuotaServer,
-  incrementMailboxSendCountServer,
+  reserveMailboxDailySendServer,
+  releaseMailboxDailySendServer,
+  releaseMailboxScheduleSlotServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 import { outboundAttachmentsToLeadMail } from "@/lib/email/lead-mail-attachments";
@@ -262,7 +263,7 @@ export async function sendClaimedScheduledEmailPg(
     return { outcome: "failed", detail: "Mailbox no longer exists." };
   }
 
-  const quota = await assertMailboxDailySendQuotaServer({
+  const quota = await reserveMailboxDailySendServer({
     organizationId,
     uid: mailboxOwnerUid,
     mailboxId,
@@ -286,6 +287,11 @@ export async function sendClaimedScheduledEmailPg(
 
   const parsedAttachments = parseOutboundAttachments(payload.attachments);
   if ("error" in parsedAttachments) {
+    await releaseMailboxDailySendServer({
+      organizationId,
+      uid: mailboxOwnerUid,
+      mailboxId,
+    }).catch(() => null);
     await updateScheduledEmailPg(organizationId, input.id, {
       status: "failed",
       leaseId: null,
@@ -459,15 +465,14 @@ export async function sendClaimedScheduledEmailPg(
       mailboxId,
       gapSeconds: mailbox.sendGapSeconds,
     });
-    try {
-      await incrementMailboxSendCountServer({
-        organizationId,
-        uid: mailboxOwnerUid,
-        mailboxId,
-      });
-    } catch {
-      /* ignore */
-    }
+    // Daily send was reserved before SMTP; release the schedule booking now that
+    // this pending slot has converted into a sent count.
+    await releaseMailboxScheduleSlotServer({
+      organizationId,
+      uid: mailboxOwnerUid,
+      mailboxId,
+      scheduledAt: row.scheduledAt,
+    }).catch(() => null);
 
     if (followupId) {
       const planId = await updateFollowupDeliveryState(followupId, {
@@ -575,6 +580,13 @@ export async function sendClaimedScheduledEmailPg(
     });
     return { outcome: "sent" };
   }
+
+  // SMTP failed — free the daily-send reservation so a retry can re-book.
+  await releaseMailboxDailySendServer({
+    organizationId,
+    uid: mailboxOwnerUid,
+    mailboxId,
+  }).catch(() => null);
 
   const attempts = Math.max(0, Number(row.attempts ?? 0)) + 1;
   const kind = classifyScheduledSendError(result.error);
