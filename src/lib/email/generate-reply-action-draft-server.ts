@@ -107,10 +107,20 @@ export async function generateReplyActionDraftServer(input: {
   }
 
   const now = new Date().toISOString();
-  await db.collection(COLLECTIONS.replyActions).doc(input.actionId).set(
-    { draftStatus: "pending", draftError: null, updatedAt: now },
-    { merge: true },
-  );
+  const actionRef = db.collection(COLLECTIONS.replyActions).doc(input.actionId);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(actionRef);
+    const cur = snap.exists ? String(snap.data()?.draftStatus ?? "") : "";
+    // Don't kick off a second generator unless force regenerate.
+    if (cur === "pending" && !input.force) {
+      return;
+    }
+    tx.set(
+      actionRef,
+      { draftStatus: "pending", draftError: null, updatedAt: now },
+      { merge: true },
+    );
+  });
 
   // Surface generating state on the lead NBA while regenerate runs.
   if (input.force) {
@@ -138,14 +148,20 @@ export async function generateReplyActionDraftServer(input: {
     });
     const to = threadCtx.to || lead.contactEmail?.trim() || "";
     if (!to) {
-      await db.collection(COLLECTIONS.replyActions).doc(input.actionId).set(
-        {
-          draftStatus: "failed",
-          draftError: "No recipient email on the inbound reply or lead.",
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true },
-      );
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(actionRef);
+        const cur = snap.exists ? String(snap.data()?.draftStatus ?? "") : "";
+        if (cur !== "pending" && cur !== "failed") return;
+        tx.set(
+          actionRef,
+          {
+            draftStatus: "failed",
+            draftError: "No recipient email on the inbound reply or lead.",
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        );
+      });
       return { ok: false, error: "No recipient email found.", status: 409 };
     }
 
@@ -206,7 +222,13 @@ export async function generateReplyActionDraftServer(input: {
       updatedAt: new Date().toISOString(),
     });
 
-    await db.collection(COLLECTIONS.replyActions).doc(input.actionId).set(patch, { merge: true });
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(actionRef);
+      const cur = snap.exists ? String(snap.data()?.draftStatus ?? "") : "";
+      // Skip if another flow already approved/sent/cleared this draft.
+      if (cur !== "pending" && cur !== "failed" && !input.force) return;
+      tx.set(actionRef, patch, { merge: true });
+    });
 
     if (input.force) {
       const baseNext = formatReplyNextActionForLead(data);
@@ -244,14 +266,20 @@ export async function generateReplyActionDraftServer(input: {
         : error instanceof Error
           ? error.message
           : "Draft generation failed";
-    await db.collection(COLLECTIONS.replyActions).doc(input.actionId).set(
-      {
-        draftStatus: "failed",
-        draftError: message.slice(0, 500),
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true },
-    );
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(actionRef);
+      const cur = snap.exists ? String(snap.data()?.draftStatus ?? "") : "";
+      if (cur !== "pending" && !input.force) return;
+      tx.set(
+        actionRef,
+        {
+          draftStatus: "failed",
+          draftError: message.slice(0, 500),
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+    });
     return { ok: false, error: message, status: 500 };
   }
 }

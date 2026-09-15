@@ -683,18 +683,19 @@ export function useLiveWorkspaceFirestore(
             return json.docs.map((d) => mapDoc(d.id, d.data ?? {}));
           };
 
-          /** Member polls: merge actor-owned + lead-owned history so KPIs aren't org top-N. */
+          /** Member polls: merge equality + manager array-contains slices. */
           const fetchMemberScopedDocs = async <T extends { id: string }>(
             collection: string,
             mapDoc: (id: string, raw: Record<string, unknown>) => T,
             base: Record<string, string>,
-            fields: readonly string[],
+            eqFields: readonly string[],
+            arrayContainsFields: readonly string[] = [],
           ): Promise<T[]> => {
             if (!memberScope || !viewerUid) {
               return fetchDocs(collection, mapDoc, base);
             }
-            const slices = await Promise.all(
-              fields.map((eqField) =>
+            const eqSlices = await Promise.all(
+              eqFields.map((eqField) =>
                 fetchDocs(collection, mapDoc, {
                   ...base,
                   eqField,
@@ -702,8 +703,17 @@ export function useLiveWorkspaceFirestore(
                 }),
               ),
             );
+            const acSlices = await Promise.all(
+              arrayContainsFields.map((arrayContainsField) =>
+                fetchDocs(collection, mapDoc, {
+                  ...base,
+                  arrayContainsField,
+                  arrayContainsValue: viewerUid,
+                }),
+              ),
+            );
             const byId = new Map<string, T>();
-            for (const slice of slices) {
+            for (const slice of [...eqSlices, ...acSlices]) {
               for (const row of slice) byId.set(row.id, row);
             }
             return Array.from(byId.values());
@@ -741,12 +751,18 @@ export function useLiveWorkspaceFirestore(
                 limit: String(TIMELINE_EVENTS_LIVE_LIMIT),
               },
               ["actorId", "leadOwnerId"],
+              ["leadOwnerManagerIds"],
             ),
-            fetchDocs(COLLECTIONS.orgActivityEvents, asOrgActivityEvent, {
-              orderBy: "createdAt",
-              orderDir: "desc",
-              limit: String(ORG_ACTIVITY_EVENTS_LIVE_LIMIT),
-            }),
+            fetchMemberScopedDocs(
+              COLLECTIONS.orgActivityEvents,
+              asOrgActivityEvent,
+              {
+                orderBy: "createdAt",
+                orderDir: "desc",
+                limit: String(ORG_ACTIVITY_EVENTS_LIVE_LIMIT),
+              },
+              ["actorId"],
+            ),
             fetchMemberScopedDocs(
               COLLECTIONS.activityRecords,
               asActivityRecord,
@@ -755,13 +771,20 @@ export function useLiveWorkspaceFirestore(
                 orderDir: "desc",
                 limit: String(ACTIVITY_RECORDS_LIVE_LIMIT),
               },
-              ["actorId"],
+              ["userId"],
+              ["userManagerIds"],
             ),
-            fetchDocs(COLLECTIONS.notes, asNote, {
-              orderBy: "createdAt",
-              orderDir: "desc",
-              limit: String(NOTES_LIVE_LIMIT),
-            }),
+            fetchMemberScopedDocs(
+              COLLECTIONS.notes,
+              asNote,
+              {
+                orderBy: "createdAt",
+                orderDir: "desc",
+                limit: String(NOTES_LIVE_LIMIT),
+              },
+              ["authorId", "leadOwnerId"],
+              ["leadOwnerManagerIds"],
+            ),
             fetchMemberScopedDocs(
               COLLECTIONS.touchpoints,
               asTouchpoint,
@@ -770,7 +793,8 @@ export function useLiveWorkspaceFirestore(
                 orderDir: "desc",
                 limit: String(TOUCHPOINTS_LIVE_LIMIT),
               },
-              ["actorId"],
+              ["actorId", "leadOwnerId"],
+              ["leadOwnerManagerIds"],
             ),
             fetchDocs(COLLECTIONS.departments, asDepartment),
             fetchDocs(COLLECTIONS.permissionOverrides, asPermissionOverride),

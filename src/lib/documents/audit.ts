@@ -307,38 +307,70 @@ export async function listAuditLogsServer(input: {
 
   const col = auditCol(db, input.organizationId);
   const fetchLimit = limit + 1;
+  const prefix = input.eventPrefix?.trim() || "";
 
-  let q = input.actorUid
-    ? col
-        .where("actorUid", "==", input.actorUid)
-        .orderBy("createdAt", "desc")
-        .limit(fetchLimit)
-    : col.orderBy("createdAt", "desc").limit(fetchLimit);
-  if (input.cursor) {
-    const cursorSnap = await col.doc(input.cursor).get();
-    if (cursorSnap.exists) {
-      q = input.actorUid
-        ? col
-            .where("actorUid", "==", input.actorUid)
-            .orderBy("createdAt", "desc")
-            .startAfter(cursorSnap)
-            .limit(fetchLimit)
-        : col.orderBy("createdAt", "desc").startAfter(cursorSnap).limit(fetchLimit);
+  /** Fetch one DB page (no in-memory eventPrefix filter). */
+  const fetchRawPage = async (
+    pageCursor: string | undefined,
+    pageLimit: number,
+  ): Promise<{ items: AuditLogRecord[]; nextCursor: string | null; rawCount: number }> => {
+    let q = input.actorUid
+      ? col
+          .where("actorUid", "==", input.actorUid)
+          .orderBy("createdAt", "desc")
+          .limit(pageLimit)
+      : col.orderBy("createdAt", "desc").limit(pageLimit);
+    if (pageCursor) {
+      const cursorSnap = await col.doc(pageCursor).get();
+      if (cursorSnap.exists) {
+        q = input.actorUid
+          ? col
+              .where("actorUid", "==", input.actorUid)
+              .orderBy("createdAt", "desc")
+              .startAfter(cursorSnap)
+              .limit(pageLimit)
+          : col.orderBy("createdAt", "desc").startAfter(cursorSnap).limit(pageLimit);
+      }
     }
+    const snap = await q.get();
+    const items = snap.docs.map((doc) => docToAuditRecord(doc, input.organizationId));
+    const hasMore = snap.docs.length >= pageLimit;
+    const nextCursor =
+      hasMore && items.length > 0 ? items[items.length - 1]!.id : null;
+    return { items, nextCursor, rawCount: snap.docs.length };
+  };
+
+  // Prefix filter after a single page yields sparse/empty results — walk until full.
+  if (prefix) {
+    const accumulated: AuditLogRecord[] = [];
+    let cursor = input.cursor;
+    let dbHasMore = true;
+    const maxPasses = 25;
+    for (let pass = 0; pass < maxPasses && accumulated.length < limit && dbHasMore; pass++) {
+      const batch = await fetchRawPage(cursor, 100);
+      if (batch.items.length === 0) {
+        dbHasMore = false;
+        break;
+      }
+      for (const row of batch.items) {
+        if (!row.event.startsWith(prefix)) continue;
+        accumulated.push(row);
+        if (accumulated.length >= limit + 1) break;
+      }
+      dbHasMore = !!batch.nextCursor;
+      cursor = batch.nextCursor ?? undefined;
+      if (accumulated.length >= limit + 1) break;
+    }
+    const hasMore = accumulated.length > limit;
+    const pageItems = hasMore ? accumulated.slice(0, limit) : accumulated;
+    const nextCursor =
+      hasMore && pageItems.length > 0 ? pageItems[pageItems.length - 1]!.id : null;
+    return { items: pageItems, nextCursor };
   }
 
-  const snap = await q.get();
-  let items: AuditLogRecord[] = snap.docs.map((doc) =>
-    docToAuditRecord(doc, input.organizationId),
-  );
-
-  if (input.eventPrefix) {
-    const prefix = input.eventPrefix;
-    items = items.filter((row) => row.event.startsWith(prefix));
-  }
-
-  const hasMore = snap.docs.length > limit;
-  const pageItems = hasMore ? items.slice(0, limit) : items;
+  const snapPage = await fetchRawPage(input.cursor, fetchLimit);
+  const hasMore = snapPage.rawCount > limit;
+  const pageItems = hasMore ? snapPage.items.slice(0, limit) : snapPage.items;
   const nextCursor =
     hasMore && pageItems.length > 0 ? pageItems[pageItems.length - 1]!.id : null;
 

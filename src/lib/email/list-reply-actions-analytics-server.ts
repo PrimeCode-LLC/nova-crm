@@ -127,6 +127,9 @@ function parseLeadMeta(data: Record<string, unknown>): LeadAnalyticsMeta {
 /**
  * List org reply actions in a createdAt window and join lead stage / ownership for outcomes
  * and hierarchy visibility.
+ *
+ * Filters by date **before** the row cap so busy orgs don't starve salesperson/manager KPIs
+ * with an arbitrary first-N org sample.
  */
 export async function listReplyActionsForAnalyticsServer(input: {
   organizationId: string;
@@ -138,14 +141,18 @@ export async function listReplyActionsForAnalyticsServer(input: {
   const db = getAdminDb();
   if (!db) return [];
 
+  const fromMs = new Date(input.fromIso).getTime();
+  const toMs = new Date(input.toIso).getTime();
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return [];
+
   const snap = await db
     .collection(COLLECTIONS.replyActions)
     .where("organizationId", "==", input.organizationId)
+    .where("createdAt", ">=", input.fromIso)
+    .where("createdAt", "<=", input.toIso)
+    .orderBy("createdAt", "desc")
     .limit(MAX_ROWS)
     .get();
-
-  const fromMs = new Date(input.fromIso).getTime();
-  const toMs = new Date(input.toIso).getTime();
 
   const actions: ReplyAction[] = [];
   for (const doc of snap.docs) {

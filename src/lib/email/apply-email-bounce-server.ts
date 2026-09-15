@@ -328,25 +328,68 @@ export async function applyEmailBounceServer(
   if (!eventsCol) return { ok: false, error: "Database not configured", status: 503 };
 
   const eventRef = eventsCol.doc(eventId);
-  const existing = await eventRef.get();
-  const existingData = existing.exists ? (existing.data() as Record<string, unknown>) : null;
-  const existingMatched = Boolean(
-    existingData &&
-      (typeof existingData.leadId === "string" || typeof existingData.contactId === "string") &&
-      existingData.unmatched !== true,
-  );
-  if (existingMatched) {
+  const now = new Date().toISOString();
+
+  const claim = await db.runTransaction(async (tx) => {
+    const existing = await tx.get(eventRef);
+    const existingData = existing.exists
+      ? (existing.data() as Record<string, unknown>)
+      : null;
+    const existingMatched = Boolean(
+      existingData &&
+        (typeof existingData.leadId === "string" ||
+          typeof existingData.contactId === "string") &&
+        existingData.unmatched !== true,
+    );
+    if (existingMatched) {
+      return {
+        kind: "already" as const,
+        leadId: typeof existingData?.leadId === "string" ? existingData.leadId : undefined,
+        contactId:
+          typeof existingData?.contactId === "string" ? existingData.contactId : undefined,
+        taskId: typeof existingData?.taskId === "string" ? existingData.taskId : undefined,
+        recoveryAction:
+          typeof existingData?.recoveryAction === "string"
+            ? (existingData.recoveryAction as BounceRecoveryAction)
+            : undefined,
+      };
+    }
+
+    const claimAtRaw = existingData?.processingClaimAt;
+    if (typeof claimAtRaw === "string") {
+      const claimMs = Date.parse(claimAtRaw);
+      if (Number.isFinite(claimMs) && Date.now() - claimMs < 5 * 60_000) {
+        return { kind: "in_flight" as const };
+      }
+    }
+
+    tx.set(
+      eventRef,
+      {
+        organizationId: input.organizationId,
+        mailboxId,
+        inboundMessageId,
+        processingClaimAt: now,
+        processingClaimBy: input.actorUid,
+        updatedAt: now,
+      },
+      { merge: true },
+    );
+    return { kind: "claimed" as const };
+  });
+
+  if (claim.kind === "already") {
     return {
       ok: true,
       alreadyProcessed: true,
-      leadId: typeof existingData?.leadId === "string" ? existingData.leadId : undefined,
-      contactId: typeof existingData?.contactId === "string" ? existingData.contactId : undefined,
-      taskId: typeof existingData?.taskId === "string" ? existingData.taskId : undefined,
-      recoveryAction:
-        typeof existingData?.recoveryAction === "string"
-          ? (existingData.recoveryAction as BounceRecoveryAction)
-          : undefined,
+      leadId: claim.leadId,
+      contactId: claim.contactId,
+      taskId: claim.taskId,
+      recoveryAction: claim.recoveryAction,
     };
+  }
+  if (claim.kind === "in_flight") {
+    return { ok: true, alreadyProcessed: true };
   }
 
   const failedRecipients = [
@@ -360,7 +403,6 @@ export async function applyEmailBounceServer(
     ? normalizeMessageId(input.originalMessageId)
     : undefined;
   const reason = (input.reason?.trim() || "Permanent delivery failure").slice(0, 300);
-  const now = new Date().toISOString();
 
   if (
     input.bounceKind === "hard" &&

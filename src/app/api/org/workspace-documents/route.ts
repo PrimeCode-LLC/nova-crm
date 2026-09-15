@@ -166,13 +166,25 @@ export async function GET(req: Request) {
     /** Allowlisted equality filters for member-scoped history polls. */
     const EQ_FIELDS = new Set([
       "actorId",
+      "authorId",
       "leadOwnerId",
       "createdById",
       "ownerId",
       "assigneeId",
+      "userId",
+    ]);
+    /** Allowlisted array-contains fields (manager hierarchy stamps). */
+    const ARRAY_CONTAINS_FIELDS = new Set([
+      "leadOwnerManagerIds",
+      "ownerManagerIds",
+      "userManagerIds",
     ]);
     const eqField = url.searchParams.get("eqField")?.trim() || undefined;
     const eqValue = url.searchParams.get("eqValue")?.trim() || undefined;
+    const arrayContainsField =
+      url.searchParams.get("arrayContainsField")?.trim() || undefined;
+    const arrayContainsValue =
+      url.searchParams.get("arrayContainsValue")?.trim() || undefined;
     const equalityFilters =
       eqField &&
       eqValue &&
@@ -180,6 +192,20 @@ export async function GET(req: Request) {
       eqValue.length > 0 &&
       eqValue.length <= 128
         ? [{ field: eqField, op: "==" as const, value: eqValue }]
+        : [];
+    const arrayContainsFilters =
+      arrayContainsField &&
+      arrayContainsValue &&
+      ARRAY_CONTAINS_FIELDS.has(arrayContainsField) &&
+      arrayContainsValue.length > 0 &&
+      arrayContainsValue.length <= 128
+        ? [
+            {
+              field: arrayContainsField,
+              op: "array-contains" as const,
+              value: arrayContainsValue,
+            },
+          ]
         : [];
 
     const { queryDocuments } = await import("@/lib/db/document-shim/store");
@@ -191,6 +217,7 @@ export async function GET(req: Request) {
       filters: [
         { field: "organizationId", op: "==", value: organizationId },
         ...equalityFilters,
+        ...arrayContainsFilters,
       ],
       ...(orderByField
         ? { orderBy: { field: orderByField, direction: orderDir } }

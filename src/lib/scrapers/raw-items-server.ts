@@ -110,6 +110,7 @@ async function queryScraperRawItemsServer(
     .where("status", "==", status);
   if (filter.platform) q = q.where("platform", "==", filter.platform);
   if (filter.category) q = q.where("category", "==", filter.category);
+  if (filter.feedId) q = q.where("feedId", "==", filter.feedId);
 
   let ordered = q.orderBy("publishedAt", "desc").limit(fetchLimit);
   if (filter.lean) {
@@ -145,9 +146,6 @@ async function queryScraperRawItemsServer(
         (!i.expiresAt || i.expiresAt > now) &&
         effectiveItemPoolEpoch(i.poolEpoch) === epoch,
     );
-  }
-  if (filter.feedId) {
-    items = items.filter((i) => i.feedId === filter.feedId);
   }
 
   return items.slice(0, limit);

@@ -271,7 +271,39 @@ export async function listErrorLogsServer(input: {
 
     const search = input.search?.trim().toLowerCase();
     if (search) {
-      items = items.filter((row) => matchesErrorLogSearch(row, search));
+      const accumulated: ErrorLogRecord[] = [];
+      let pageCursor = input.cursor;
+      let dbHasMore = true;
+      const maxPasses = 25;
+
+      for (let pass = 0; pass < maxPasses && accumulated.length < limit + 1 && dbHasMore; pass++) {
+        let nextQ = q.limit(100);
+        if (pageCursor) {
+          const cursorSnap = await col.doc(pageCursor).get();
+          if (cursorSnap.exists) {
+            nextQ = q.startAfter(cursorSnap).limit(100);
+          }
+        }
+        const nextSnap = await nextQ.get();
+        const pageItems = nextSnap.docs.map((doc) =>
+          docToErrorLogRecord(doc, input.organizationId),
+        );
+        dbHasMore = nextSnap.docs.length >= 100;
+        if (pageItems.length === 0) break;
+        pageCursor = pageItems[pageItems.length - 1]!.id;
+
+        for (const row of pageItems) {
+          if (!matchesErrorLogSearch(row, search)) continue;
+          accumulated.push(row);
+          if (accumulated.length >= limit + 1) break;
+        }
+      }
+
+      const hasMore = accumulated.length > limit;
+      const pageOut = hasMore ? accumulated.slice(0, limit) : accumulated;
+      const nextCursor =
+        hasMore && pageOut.length > 0 ? pageOut[pageOut.length - 1]!.id : null;
+      return { items: pageOut, nextCursor, totalCount };
     }
 
     const hasMore = snap.docs.length > limit;
