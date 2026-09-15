@@ -15,13 +15,37 @@ function isSummaryRangeKey(value: string): value is OrgDashboardSummaryRangeKey 
   return (ORG_DASHBOARD_SUMMARY_RANGE_KEYS as readonly string[]).includes(value);
 }
 
+/**
+ * Apply person-scoped task gauges onto live workflow metrics.
+ * Safe for any role (org-wide or member) — does not touch org KPIs.
+ */
+export function applyPersonDashboardGaugesToWorkflowMetrics(
+  live: DashboardWorkflowMetrics,
+  person?: PersonDashboardTaskGauges | null,
+): DashboardWorkflowMetrics {
+  if (!person) return live;
+  const next = { ...live };
+  const assign = <K extends keyof DashboardWorkflowMetrics>(
+    key: K,
+    value: unknown,
+  ) => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      next[key] = Math.max(0, value) as DashboardWorkflowMetrics[K];
+    }
+  };
+  assign("myOpenTasks", person.myOpenTasks);
+  assign("overdueTasks", person.overdueTasks);
+  assign("waitingOnOthers", person.waitingOnOthers);
+  return next;
+}
+
 export function applyOrgDashboardSummaryToWorkflowMetrics(
   live: DashboardWorkflowMetrics,
   summary: OrgDashboardSummary,
   rangeKey: string,
   person?: PersonDashboardTaskGauges | null,
 ): DashboardWorkflowMetrics {
-  const next = { ...live };
+  const next = applyPersonDashboardGaugesToWorkflowMetrics({ ...live }, person);
   const assign = <K extends keyof DashboardWorkflowMetrics>(
     key: K,
     value: unknown,
@@ -41,12 +65,6 @@ export function applyOrgDashboardSummaryToWorkflowMetrics(
   assign("overdueFollowups", summary.overdueFollowups);
   assign("totalReplies", summary.totalReplies);
   assign("repliesPendingReview", summary.repliesPendingReview);
-
-  if (person) {
-    assign("myOpenTasks", person.myOpenTasks);
-    assign("overdueTasks", person.overdueTasks);
-    assign("waitingOnOthers", person.waitingOnOthers);
-  }
 
   if (isSummaryRangeKey(rangeKey)) {
     const window = summary.ranges?.[rangeKey];

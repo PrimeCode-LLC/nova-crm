@@ -71,6 +71,23 @@ export function ownedMatchesMemberScope(
   return stringArrayIncludes(row.ownerManagerIds, viewerUid);
 }
 
+/**
+ * Prisma WHERE for member-scoped accounts / contacts / deals.
+ * Applied in SQL before pagination (same bug class as leads list).
+ */
+export function ownedMemberScopeWhere(
+  viewerUid: string,
+): Prisma.AccountWhereInput {
+  const uid = viewerUid.trim();
+  if (!uid) return { id: "__never__" };
+  return {
+    OR: [
+      { ownerId: uid },
+      { payload: { path: ["ownerManagerIds"], array_contains: uid } },
+    ],
+  };
+}
+
 export function encodeCrmListCursor(updatedAt: Date, id: string): string {
   return `${updatedAt.toISOString()}|${id}`;
 }
@@ -101,17 +118,30 @@ function optionalIso(value: unknown): string | undefined {
 function cursorWhere(
   organizationId: string,
   decoded: { updatedAt: Date; id: string } | null,
+  viewerUid?: string | null,
+  narrowToMember?: boolean,
 ): Prisma.AccountWhereInput {
+  const narrow = Boolean(narrowToMember) && Boolean(viewerUid?.trim());
+  const cursorClause: Prisma.AccountWhereInput | null = decoded
+    ? {
+        OR: [
+          { updatedAt: { lt: decoded.updatedAt } },
+          { updatedAt: decoded.updatedAt, id: { lt: decoded.id } },
+        ],
+      }
+    : null;
   return {
     organizationId,
-    ...(decoded
+    ...(narrow
       ? {
-          OR: [
-            { updatedAt: { lt: decoded.updatedAt } },
-            { updatedAt: decoded.updatedAt, id: { lt: decoded.id } },
+          AND: [
+            ownedMemberScopeWhere(viewerUid!),
+            ...(cursorClause ? [cursorClause] : []),
           ],
         }
-      : {}),
+      : cursorClause
+        ? cursorClause
+        : {}),
   };
 }
 
@@ -189,7 +219,12 @@ export async function listAccountsPageFromPostgres(
 
   const take = clampPageSize(options.limit);
   const decoded = decodeCrmListCursor(options.cursor);
-  const where = cursorWhere(organizationId, decoded);
+  const where = cursorWhere(
+    organizationId,
+    decoded,
+    options.viewerUid,
+    options.narrowToMember,
+  );
 
   const rows = await withOrganizationScope(organizationId, (tx) =>
     tx.account.findMany({
@@ -201,11 +236,7 @@ export async function listAccountsPageFromPostgres(
 
   const hasMore = rows.length > take;
   const pageRows = hasMore ? rows.slice(0, take) : rows;
-  let accounts = pageRows.map(accountFromPostgresRow);
-  if (options.narrowToMember && options.viewerUid) {
-    const uid = options.viewerUid;
-    accounts = accounts.filter((a) => ownedMatchesMemberScope(a, uid));
-  }
+  const accounts = pageRows.map(accountFromPostgresRow);
   const last = pageRows[pageRows.length - 1];
   return {
     accounts,
@@ -225,7 +256,12 @@ export async function listContactsPageFromPostgres(
 
   const take = clampPageSize(options.limit);
   const decoded = decodeCrmListCursor(options.cursor);
-  const where = cursorWhere(organizationId, decoded) as Prisma.ContactWhereInput;
+  const where = cursorWhere(
+    organizationId,
+    decoded,
+    options.viewerUid,
+    options.narrowToMember,
+  ) as Prisma.ContactWhereInput;
 
   const rows = await withOrganizationScope(organizationId, (tx) =>
     tx.contact.findMany({
@@ -237,11 +273,7 @@ export async function listContactsPageFromPostgres(
 
   const hasMore = rows.length > take;
   const pageRows = hasMore ? rows.slice(0, take) : rows;
-  let contacts = pageRows.map(contactFromPostgresRow);
-  if (options.narrowToMember && options.viewerUid) {
-    const uid = options.viewerUid;
-    contacts = contacts.filter((c) => ownedMatchesMemberScope(c, uid));
-  }
+  const contacts = pageRows.map(contactFromPostgresRow);
   const last = pageRows[pageRows.length - 1];
   return {
     contacts,
@@ -261,7 +293,12 @@ export async function listDealsPageFromPostgres(
 
   const take = clampPageSize(options.limit);
   const decoded = decodeCrmListCursor(options.cursor);
-  const where = cursorWhere(organizationId, decoded) as Prisma.DealWhereInput;
+  const where = cursorWhere(
+    organizationId,
+    decoded,
+    options.viewerUid,
+    options.narrowToMember,
+  ) as Prisma.DealWhereInput;
 
   const rows = await withOrganizationScope(organizationId, (tx) =>
     tx.deal.findMany({
@@ -273,11 +310,7 @@ export async function listDealsPageFromPostgres(
 
   const hasMore = rows.length > take;
   const pageRows = hasMore ? rows.slice(0, take) : rows;
-  let deals = pageRows.map(dealFromPostgresRow);
-  if (options.narrowToMember && options.viewerUid) {
-    const uid = options.viewerUid;
-    deals = deals.filter((d) => ownedMatchesMemberScope(d, uid));
-  }
+  const deals = pageRows.map(dealFromPostgresRow);
   const last = pageRows[pageRows.length - 1];
   return {
     deals,

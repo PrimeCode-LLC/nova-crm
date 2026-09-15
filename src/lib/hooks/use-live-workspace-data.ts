@@ -53,7 +53,8 @@ import {
 /** Cap history listeners so WebChannel does not load unbounded org history into every client. */
 const ACTIVITY_RECORDS_LIVE_LIMIT = 200;
 /** Poll interval when CRM entities are read from Postgres instead of Firestore onSnapshot. */
-const POSTGRES_CRM_POLL_MS = 60_000;
+/** Member dashboards rely on this poll for live KPIs (no org-summary overlay). */
+const POSTGRES_CRM_POLL_MS = 15_000;
 const ORG_ACTIVITY_EVENTS_LIVE_LIMIT = 120;
 const TIMELINE_EVENTS_LIVE_LIMIT = 400;
 /** Lead-detail history caps for Firebase-free org-wide polls (notes / touchpoints). */
@@ -682,6 +683,32 @@ export function useLiveWorkspaceFirestore(
             return json.docs.map((d) => mapDoc(d.id, d.data ?? {}));
           };
 
+          /** Member polls: merge actor-owned + lead-owned history so KPIs aren't org top-N. */
+          const fetchMemberScopedDocs = async <T extends { id: string }>(
+            collection: string,
+            mapDoc: (id: string, raw: Record<string, unknown>) => T,
+            base: Record<string, string>,
+            fields: readonly string[],
+          ): Promise<T[]> => {
+            if (!memberScope || !viewerUid) {
+              return fetchDocs(collection, mapDoc, base);
+            }
+            const slices = await Promise.all(
+              fields.map((eqField) =>
+                fetchDocs(collection, mapDoc, {
+                  ...base,
+                  eqField,
+                  eqValue: viewerUid,
+                }),
+              ),
+            );
+            const byId = new Map<string, T>();
+            for (const slice of slices) {
+              for (const row of slice) byId.set(row.id, row);
+            }
+            return Array.from(byId.values());
+          };
+
           const [
             users,
             followups,
@@ -705,31 +732,46 @@ export function useLiveWorkspaceFirestore(
             fetchDocs(COLLECTIONS.labels, asCrmLabel),
             fetchDocs(COLLECTIONS.profiles, asProfile),
             fetchDocs(COLLECTIONS.campaigns, asCampaign),
-            fetchDocs(COLLECTIONS.timelineEvents, asTimelineEvent, {
-              orderBy: "createdAt",
-              orderDir: "desc",
-              limit: String(TIMELINE_EVENTS_LIVE_LIMIT),
-            }),
+            fetchMemberScopedDocs(
+              COLLECTIONS.timelineEvents,
+              asTimelineEvent,
+              {
+                orderBy: "createdAt",
+                orderDir: "desc",
+                limit: String(TIMELINE_EVENTS_LIVE_LIMIT),
+              },
+              ["actorId", "leadOwnerId"],
+            ),
             fetchDocs(COLLECTIONS.orgActivityEvents, asOrgActivityEvent, {
               orderBy: "createdAt",
               orderDir: "desc",
               limit: String(ORG_ACTIVITY_EVENTS_LIVE_LIMIT),
             }),
-            fetchDocs(COLLECTIONS.activityRecords, asActivityRecord, {
-              orderBy: "occurredAt",
-              orderDir: "desc",
-              limit: String(ACTIVITY_RECORDS_LIVE_LIMIT),
-            }),
+            fetchMemberScopedDocs(
+              COLLECTIONS.activityRecords,
+              asActivityRecord,
+              {
+                orderBy: "occurredAt",
+                orderDir: "desc",
+                limit: String(ACTIVITY_RECORDS_LIVE_LIMIT),
+              },
+              ["actorId"],
+            ),
             fetchDocs(COLLECTIONS.notes, asNote, {
               orderBy: "createdAt",
               orderDir: "desc",
               limit: String(NOTES_LIVE_LIMIT),
             }),
-            fetchDocs(COLLECTIONS.touchpoints, asTouchpoint, {
-              orderBy: "occurredAt",
-              orderDir: "desc",
-              limit: String(TOUCHPOINTS_LIVE_LIMIT),
-            }),
+            fetchMemberScopedDocs(
+              COLLECTIONS.touchpoints,
+              asTouchpoint,
+              {
+                orderBy: "occurredAt",
+                orderDir: "desc",
+                limit: String(TOUCHPOINTS_LIVE_LIMIT),
+              },
+              ["actorId"],
+            ),
             fetchDocs(COLLECTIONS.departments, asDepartment),
             fetchDocs(COLLECTIONS.permissionOverrides, asPermissionOverride),
           ]);

@@ -12,6 +12,7 @@ import {
   decodeCrmListCursor,
   encodeCrmListCursor,
   ownedMatchesMemberScope,
+  ownedMemberScopeWhere,
 } from "@/lib/db/list-crm-postgres";
 import {
   isPostgresReadCrmV1Enabled,
@@ -147,5 +148,20 @@ describe("ownedMatchesMemberScope", () => {
     expect(ownedMatchesMemberScope({ ownerId: "other", ownerManagerIds: ["mgr"] }, "u1")).toBe(
       false,
     );
+  });
+});
+
+describe("ownedMemberScopeWhere", () => {
+  it("returns never-match when uid empty", () => {
+    expect(ownedMemberScopeWhere("")).toEqual({ id: "__never__" });
+  });
+
+  it("ORs ownerId with payload ownerManagerIds", () => {
+    expect(ownedMemberScopeWhere("u1")).toEqual({
+      OR: [
+        { ownerId: "u1" },
+        { payload: { path: ["ownerManagerIds"], array_contains: "u1" } },
+      ],
+    });
   });
 });

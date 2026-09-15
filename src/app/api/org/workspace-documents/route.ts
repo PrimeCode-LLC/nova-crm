@@ -163,13 +163,35 @@ export async function GET(req: Request) {
         ? Math.min(Math.floor(limitParsed), 2000)
         : undefined;
 
+    /** Allowlisted equality filters for member-scoped history polls. */
+    const EQ_FIELDS = new Set([
+      "actorId",
+      "leadOwnerId",
+      "createdById",
+      "ownerId",
+      "assigneeId",
+    ]);
+    const eqField = url.searchParams.get("eqField")?.trim() || undefined;
+    const eqValue = url.searchParams.get("eqValue")?.trim() || undefined;
+    const equalityFilters =
+      eqField &&
+      eqValue &&
+      EQ_FIELDS.has(eqField) &&
+      eqValue.length > 0 &&
+      eqValue.length <= 128
+        ? [{ field: eqField, op: "==" as const, value: eqValue }]
+        : [];
+
     const { queryDocuments } = await import("@/lib/db/document-shim/store");
     const collectionRoot = collection.split("/")[0] ?? collection;
     const docs = await queryDocuments({
       collectionRoot,
       pathPrefix: collection,
       organizationId,
-      filters: [{ field: "organizationId", op: "==", value: organizationId }],
+      filters: [
+        { field: "organizationId", op: "==", value: organizationId },
+        ...equalityFilters,
+      ],
       ...(orderByField
         ? { orderBy: { field: orderByField, direction: orderDir } }
         : {}),

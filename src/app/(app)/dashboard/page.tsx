@@ -22,6 +22,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import {
   applyOrgDashboardSummaryToWorkflowMetrics,
+  applyPersonDashboardGaugesToWorkflowMetrics,
   summaryClosedRevenue,
 } from "@/lib/dashboard-summary-apply";
 import {
@@ -373,8 +374,16 @@ export default function DashboardPage() {
   });
   const displayMetrics = React.useMemo(() => {
     const summary = dashboardSummary.summary;
-    if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) {
+    if (!dashboardSummary.enabled) {
       return workflowMetrics;
+    }
+    // Org-wide precomputed KPIs only for tenant-wide viewers; person task gauges
+    // apply for every role (salespeople included).
+    if (!orgWideDashboardScope || !summary) {
+      return applyPersonDashboardGaugesToWorkflowMetrics(
+        workflowMetrics,
+        dashboardSummary.person,
+      );
     }
     return applyOrgDashboardSummaryToWorkflowMetrics(
       workflowMetrics,

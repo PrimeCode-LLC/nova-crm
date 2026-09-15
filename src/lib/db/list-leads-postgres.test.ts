@@ -4,6 +4,7 @@ import type { Lead as PrismaLead } from "@/generated/prisma/client";
 import {
   leadFromPostgresRow,
   leadMatchesMemberScope,
+  memberLeadScopeWhere,
 } from "@/lib/db/list-leads-postgres";
 import {
   isPostgresReadLeadsV1Enabled,
@@ -148,5 +149,28 @@ describe("leadMatchesMemberScope", () => {
 
   it("rejects unrelated viewer", () => {
     expect(leadMatchesMemberScope(base, "u1")).toBe(false);
+  });
+});
+
+describe("memberLeadScopeWhere", () => {
+  it("returns never-match when uid empty", () => {
+    expect(memberLeadScopeWhere("")).toEqual({ id: "__never__" });
+  });
+
+  it("ORs ownerId with payload array_contains paths", () => {
+    const where = memberLeadScopeWhere("u1");
+    expect(where).toEqual({
+      OR: [
+        { ownerId: "u1" },
+        { payload: { path: ["ownerManagerIds"], array_contains: "u1" } },
+        { payload: { path: ["sharedOwnerIds"], array_contains: "u1" } },
+        {
+          AND: [
+            { intakeKind: "prospect" },
+            { payload: { path: ["prospectAssigneeIds"], array_contains: "u1" } },
+          ],
+        },
+      ],
+    });
   });
 });

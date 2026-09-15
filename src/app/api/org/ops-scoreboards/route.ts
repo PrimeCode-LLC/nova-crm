@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { isDashboardSummariesV1Enabled } from "@/lib/dashboard-summary-flags";
+import { isPostgresDashboardSummaryReadEnabled } from "@/lib/db/postgres-dashboard-summary-flags";
 import {
   getOpsScoreboardsServer,
   isOpsScoreboardsRange,
@@ -10,12 +11,13 @@ import { parseDashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 /**
  * P0.13 — Team Command / Strategy / Inbox / Person scorecard rows (Redis → Admin recount).
  * Query: `?range=30d` (defaults to 30d).
+ * Enabled when Postgres dashboard summaries OR Phase 0 Firestore rollback is on.
  */
 export async function GET(req: Request) {
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
 
-  if (!isDashboardSummariesV1Enabled()) {
+  if (!isPostgresDashboardSummaryReadEnabled() && !isDashboardSummariesV1Enabled()) {
     return NextResponse.json({ ok: true, enabled: false, payload: null, source: null });
   }
 

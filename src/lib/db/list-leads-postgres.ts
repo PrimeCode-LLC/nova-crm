@@ -95,6 +95,29 @@ export function leadMatchesMemberScope(lead: Lead, viewerUid: string): boolean {
   return false;
 }
 
+/**
+ * Prisma WHERE for member-scoped lead lists.
+ * Must be applied in SQL (not after pagination) so reps/managers get a full
+ * page of *their* rows instead of the org's newest N filtered down to ~0.
+ */
+export function memberLeadScopeWhere(viewerUid: string): Prisma.LeadWhereInput {
+  const uid = viewerUid.trim();
+  if (!uid) return { id: "__never__" };
+  return {
+    OR: [
+      { ownerId: uid },
+      { payload: { path: ["ownerManagerIds"], array_contains: uid } },
+      { payload: { path: ["sharedOwnerIds"], array_contains: uid } },
+      {
+        AND: [
+          { intakeKind: "prospect" },
+          { payload: { path: ["prospectAssigneeIds"], array_contains: uid } },
+        ],
+      },
+    ],
+  };
+}
+
 /** Map a dual-written Postgres lead row into the workspace `Lead` type. */
 export function leadFromPostgresRow(
   row: PrismaLead,
@@ -164,17 +187,30 @@ export async function listLeadsPageFromPostgres(
 
   const take = clampPageSize(options.limit);
   const decoded = decodeLeadsListCursor(options.cursor);
+  const narrow =
+    Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+
+  const cursorClause: Prisma.LeadWhereInput | null = decoded
+    ? {
+        OR: [
+          { updatedAt: { lt: decoded.updatedAt } },
+          { updatedAt: decoded.updatedAt, id: { lt: decoded.id } },
+        ],
+      }
+    : null;
 
   const where: Prisma.LeadWhereInput = {
     organizationId,
-    ...(decoded
+    ...(narrow
       ? {
-          OR: [
-            { updatedAt: { lt: decoded.updatedAt } },
-            { updatedAt: decoded.updatedAt, id: { lt: decoded.id } },
+          AND: [
+            memberLeadScopeWhere(options.viewerUid!),
+            ...(cursorClause ? [cursorClause] : []),
           ],
         }
-      : {}),
+      : cursorClause
+        ? cursorClause
+        : {}),
   };
 
   const rows = await withOrganizationScope(organizationId, (tx) =>
@@ -187,12 +223,7 @@ export async function listLeadsPageFromPostgres(
 
   const hasMore = rows.length > take;
   const pageRows = hasMore ? rows.slice(0, take) : rows;
-  let leads = pageRows.map((row) => leadFromPostgresRow(row, { slim: true }));
-
-  if (options.narrowToMember && options.viewerUid) {
-    const uid = options.viewerUid;
-    leads = leads.filter((lead) => leadMatchesMemberScope(lead, uid));
-  }
+  const leads = pageRows.map((row) => leadFromPostgresRow(row, { slim: true }));
 
   const last = pageRows[pageRows.length - 1];
   const nextCursor =

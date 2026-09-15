@@ -24,14 +24,19 @@ export function isOrgDashboardSummaryClientEnabled(): boolean {
 /**
  * Fetches precomputed org dashboard KPIs (+ person task gauges) when a summary
  * read flag is on. Fall back to live aggregation when `summary` is null.
+ *
+ * Always loads when enabled — person gauges are valid for every role. Callers
+ * must only overlay the **org** summary when `canApplyOrgWideDashboardSummary`
+ * is true (pass that as `orgWideScope` for callers that still need the flag
+ * for scoreboards; it no longer disables this query).
  */
 export function useOrgDashboardSummary(opts: {
   enabled?: boolean;
-  /** Org-wide summary only — disable when channel/owner filters are active. */
+  /** @deprecated No longer gates the fetch; kept for call-site compatibility. */
   orgWideScope?: boolean;
 }) {
   const flagOn = isOrgDashboardSummaryClientEnabled();
-  const enabled = Boolean(opts.enabled) && flagOn && opts.orgWideScope !== false;
+  const enabled = Boolean(opts.enabled) && flagOn;
 
   const query = useQuery({
     queryKey: ["org", "dashboard-summary", "v1"],

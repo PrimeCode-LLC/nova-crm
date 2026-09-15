@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { isDashboardSummariesV1Enabled } from "@/lib/dashboard-summary-flags";
+import { isOrgDashboardSummaryClientEnabled } from "@/hooks/use-org-dashboard-summary";
 import type { ContentOpsOrgGauges, ContentOpsPersonGauges } from "@/lib/content-ops-summary";
 
 type ContentOpsSummaryResponse = {
@@ -13,10 +13,10 @@ type ContentOpsSummaryResponse = {
 };
 
 /**
- * Precomputed content-ops KPIs when `dashboard_summaries_v1` is on (P0.12).
+ * Precomputed content-ops KPIs when org dashboard summaries are readable (P0.12).
  */
 export function useContentOpsSummary(opts?: { enabled?: boolean }) {
-  const flagOn = isDashboardSummariesV1Enabled();
+  const flagOn = isOrgDashboardSummaryClientEnabled();
   const enabled = Boolean(opts?.enabled !== false) && flagOn;
 
   const query = useQuery({

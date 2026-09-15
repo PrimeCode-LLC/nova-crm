@@ -34,7 +34,10 @@ import {
   flattenTimelineByLead,
 } from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
-import { applyOrgDashboardSummaryToWorkflowMetrics } from "@/lib/dashboard-summary-apply";
+import {
+  applyOrgDashboardSummaryToWorkflowMetrics,
+  applyPersonDashboardGaugesToWorkflowMetrics,
+} from "@/lib/dashboard-summary-apply";
 import { canApplyOrgWideDashboardSummary } from "@/lib/dashboard-kpi-scope";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
 import { DEFAULT_DASHBOARD_WIDGETS } from "@/lib/dashboard-preferences";
@@ -334,7 +337,13 @@ function DashboardWallPageInner() {
   });
   const displayMetrics = React.useMemo(() => {
     const summary = dashboardSummary.summary;
-    if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) return metrics;
+    if (!dashboardSummary.enabled) return metrics;
+    if (!orgWideDashboardScope || !summary) {
+      return applyPersonDashboardGaugesToWorkflowMetrics(
+        metrics,
+        dashboardSummary.person,
+      );
+    }
     return applyOrgDashboardSummaryToWorkflowMetrics(
       metrics,
       summary,
