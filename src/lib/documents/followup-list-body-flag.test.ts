@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { projectWorkspaceListPayload } from "@/lib/db/document-shim/timestamp";
 import { canAutoScheduleFollowupEmail } from "@/lib/followup-plans";
 import type { Followup } from "@/lib/types";
@@ -52,5 +52,31 @@ describe("followup list body flag contract", () => {
       emailScheduledAt: new Date().toISOString(),
     });
     expect(canAutoScheduleFollowupEmail(f, "cold_email")).toBe(false);
+  });
+});
+
+describe("followupMessageBodyChanged", () => {
+  it("does not treat omitted live body as a change when hydrated text matches", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/db/document-access/client", () => ({
+      getClientDb: () => ({}),
+    }));
+    vi.doMock("@/lib/db/document-shim/shim-client-firestore", () => ({
+      doc: () => ({}),
+      getDoc: async () => ({
+        exists: () => true,
+        data: () => ({ messageBody: "Hello James" }),
+      }),
+    }));
+    const { followupMessageBodyChanged } = await import(
+      "@/lib/documents/fetch-followup-message-body-client"
+    );
+    const existing = baseFollowup({
+      hasMessageBody: true,
+      messageBody: undefined,
+      emailSubject: "Hi",
+    });
+    await expect(followupMessageBodyChanged(existing, "Hello James")).resolves.toBe(false);
+    await expect(followupMessageBodyChanged(existing, "Changed")).resolves.toBe(true);
   });
 });

@@ -45,6 +45,25 @@ export async function hydrateFollowupMessageBody(f: Followup): Promise<Followup>
   return { ...f, messageBody: body, hasMessageBody: undefined };
 }
 
+/**
+ * Compare a patched body to live CRM state. Live rows omit `messageBody`, so a
+ * naive `!== existing.messageBody` always looks like a change and cancels schedules.
+ */
+export async function followupMessageBodyChanged(
+  existing: Followup,
+  nextBody: string | undefined,
+): Promise<boolean> {
+  const normalizedNext = nextBody?.trim() || undefined;
+  if (existing.messageBody != null) {
+    return normalizedNext !== (existing.messageBody.trim() || undefined);
+  }
+  if (!existing.hasMessageBody && !existing.emailSubject?.trim()) {
+    return Boolean(normalizedNext);
+  }
+  const hydrated = await hydrateFollowupMessageBody(existing);
+  return normalizedNext !== (hydrated.messageBody?.trim() || undefined);
+}
+
 export async function hydrateFollowupsMessageBodies(
   items: readonly Followup[],
 ): Promise<Followup[]> {

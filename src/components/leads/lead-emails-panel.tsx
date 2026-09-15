@@ -458,7 +458,10 @@ export function LeadEmailsPanel({
   React.useEffect(() => {
     if (!active || workspace.isDemo) return;
     const toFetch = crmSentFollowups.filter(
-      (f) => f.hasMessageBody && !f.messageBody?.trim() && hydratedFollowupBodies[f.id] === undefined,
+      (f) =>
+        (f.hasMessageBody || Boolean(f.emailSubject?.trim())) &&
+        !f.messageBody?.trim() &&
+        hydratedFollowupBodies[f.id] === undefined,
     );
     if (toFetch.length === 0) return;
     let cancelled = false;

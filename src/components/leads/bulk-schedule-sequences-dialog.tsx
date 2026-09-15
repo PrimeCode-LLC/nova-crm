@@ -50,8 +50,8 @@ import { hydrateFollowupMessageBody } from "@/lib/documents/fetch-followup-messa
 import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,
+  isFollowupEmailChannel,
   openFollowupsForPlan,
-  resolveFollowupChannel,
 } from "@/lib/followup-plans";
 import {
   countContinuityPreflight,
@@ -252,16 +252,18 @@ export function BulkScheduleSequencesDialog({
       if (readySteps.length > 0) return { bucket: "ready" };
 
       // Email-capable steps that are already queued (canAutoSchedule excludes scheduledEmailId).
+      // Live list omits messageBody — do not require inline body here.
       const emailCapableQueued = openSteps.filter((f) => {
-        if (!f.messageBody?.trim() || !f.scheduledEmailId) return false;
+        if (!f.scheduledEmailId) return false;
         if (f.pausedAt || f.completedAt) return false;
-        const ch = resolveFollowupChannel(f.channel, lead.channel);
-        return !(
-          ch === "linkedin_outbound" ||
-          ch === "linkedin_1to1" ||
-          ch === "upwork" ||
-          ch === "job_apply"
-        );
+        if (
+          !f.messageBody?.trim() &&
+          !f.hasMessageBody &&
+          !f.emailSubject?.trim()
+        ) {
+          return false;
+        }
+        return isFollowupEmailChannel(f, lead.channel);
       });
       if (emailCapableQueued.length > 0) {
         return { bucket: "already_scheduled" };

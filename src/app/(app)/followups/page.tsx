@@ -49,7 +49,10 @@ import {
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
 import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
 import { followupScheduleMailboxFields, scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
-import { hydrateFollowupMessageBody } from "@/lib/documents/fetch-followup-message-body-client";
+import {
+  hydrateFollowupMessageBody,
+  followupMessageBodyChanged,
+} from "@/lib/documents/fetch-followup-message-body-client";
 import {
   followupQueueKind,
   isFollowupEmailChannel,
@@ -536,15 +539,15 @@ export default function FollowupsPage() {
     id: string,
     patch: Parameters<typeof updateFollowup>[1],
   ) {
-    const existing = allFollowups.find((f) => f.id === id);
-    const dueChanged =
-      patch.dueAt !== undefined && existing != null && patch.dueAt !== existing.dueAt;
-    const bodyChanged =
-      patch.messageBody !== undefined &&
-      existing != null &&
-      (patch.messageBody || undefined) !== (existing.messageBody || undefined);
-    if (existing?.scheduledEmailId && (dueChanged || bodyChanged)) {
-      void (async () => {
+    void (async () => {
+      const existing = allFollowups.find((f) => f.id === id);
+      const dueChanged =
+        patch.dueAt !== undefined && existing != null && patch.dueAt !== existing.dueAt;
+      const bodyChanged =
+        patch.messageBody !== undefined &&
+        existing != null &&
+        (await followupMessageBodyChanged(existing, patch.messageBody));
+      if (existing?.scheduledEmailId && (dueChanged || bodyChanged)) {
         const result = await cancelScheduledEmailClient({
           scheduledEmailId: existing.scheduledEmailId!,
           isDemo,
@@ -559,11 +562,9 @@ export default function FollowupsPage() {
           return;
         }
         clearFollowupEmailSchedule(id);
-        updateFollowup(id, patch);
-      })();
-      return;
-    }
-    updateFollowup(id, patch);
+      }
+      updateFollowup(id, patch);
+    })();
   }
 
   async function applyDueAtToFollowups(

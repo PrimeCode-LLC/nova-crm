@@ -47,7 +47,7 @@ import {
 import { FollowupPlanPausedBanner } from "@/components/leads/followup-plan-paused-banner";
 import { ScheduleFollowupEmailDialog } from "@/components/leads/schedule-followup-email-dialog";
 import { ScheduleSequenceEmailsDialog } from "@/components/leads/schedule-sequence-emails-dialog";
-import { hydrateFollowupMessageBody } from "@/lib/documents/fetch-followup-message-body-client";
+import { hydrateFollowupMessageBody, followupMessageBodyChanged } from "@/lib/documents/fetch-followup-message-body-client";
 import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,
@@ -746,7 +746,7 @@ export function LeadFollowups({
     const bodyChanged =
       patch.messageBody !== undefined &&
       existing != null &&
-      (patch.messageBody || undefined) !== (existing.messageBody || undefined);
+      (await followupMessageBodyChanged(existing, patch.messageBody));
     if (existing?.scheduledEmailId && (dueChanged || bodyChanged)) {
       const ok = await cancelLinkedSchedule(existing);
       if (!ok) return;

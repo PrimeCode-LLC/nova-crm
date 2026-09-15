@@ -18,7 +18,7 @@ describe("resolveFollowupHasMessageBody", () => {
   });
 
   it("returns false when neither body nor flag is present", () => {
-    expect(resolveFollowupHasMessageBody({ title: "Call" })).toBe(false);
+    expect(resolveFollowupHasMessageBody({})).toBe(false);
     expect(resolveFollowupHasMessageBody({ messageBody: "   " })).toBe(false);
   });
 

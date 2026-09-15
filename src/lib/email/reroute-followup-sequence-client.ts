@@ -5,6 +5,7 @@ import {
 } from "@/lib/email/bounce-recovery";
 import { isoFromDatetimeLocalInZone, resolveOrgTimezone } from "@/lib/org-timezone";
 import { scheduleFollowupEmailClient, followupScheduleMailboxFields } from "@/lib/schedule-followup-email-client";
+import { hydrateFollowupMessageBody } from "@/lib/documents/fetch-followup-message-body-client";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import type { Followup, FollowupPlan } from "@/lib/types";
 
@@ -105,8 +106,20 @@ export async function rerouteFollowupSequenceClient(
     const dueAt = dueAts[i]!;
     input.updateFollowupDueAt(step.id, dueAt);
 
-    const body = step.messageBody?.trim() ?? "";
-    const subject = step.emailSubject?.trim() || step.title;
+    let hydrated: Followup;
+    try {
+      hydrated = await hydrateFollowupMessageBody(step);
+    } catch (e) {
+      return {
+        ok: false,
+        error:
+          e instanceof Error && e.message.trim()
+            ? e.message.trim()
+            : "Could not load follow-up email body",
+      };
+    }
+    const body = hydrated.messageBody?.trim() ?? "";
+    const subject = hydrated.emailSubject?.trim() || hydrated.title;
     if (!body) continue;
 
     const local = scheduleLocalFromDueAt(dueAt, i, timeZone);
