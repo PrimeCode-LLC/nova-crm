@@ -220,18 +220,11 @@ export function ScheduleSequenceEmailsDialog({
     [followups, lead.channel],
   );
 
-  // Seed once per open. Lock immediately — waiting until hydrate finishes let
-  // workspace polls change `schedulable` mid-flight, cancel the run, and re-seed
-  // with fewer steps (emails appearing to vanish one by one).
-  const seededRef = React.useRef(false);
-
+  // Seed once when the dialog opens. Do not depend on `schedulable` /
+  // `planFollowups` — workspace polls give them new identities and would
+  // cancel hydrate mid-flight, re-seeding with fewer steps (emails vanishing).
   React.useEffect(() => {
-    if (!open) {
-      seededRef.current = false;
-      return;
-    }
-    if (seededRef.current) return;
-    seededRef.current = true;
+    if (!open) return;
     const toHydrate = schedulable;
     const planSnapshot = planFollowups;
     const recipientSnapshot = recipientOptions;
@@ -312,9 +305,7 @@ export function ScheduleSequenceEmailsDialog({
     return () => {
       cancelled = true;
     };
-    // Intentionally seed only when `open` flips. Poll-driven identity churn on
-    // schedulable / planFollowups must not restart hydrate.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed only when open flips
   }, [open]);
 
   React.useEffect(() => {

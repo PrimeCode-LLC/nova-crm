@@ -166,17 +166,10 @@ export function ScheduleFollowupEmailDialog({
   );
   const timezoneLabel = formatTimezoneDisplayLabel(scheduleTimezone);
 
-  // Seed once per open (per followup id). Lock before hydrate so workspace
-  // polls that replace the `followup` object cannot cancel mid-flight.
-  const seededForIdRef = React.useRef<string | null>(null);
-
+  // Seed when the dialog opens or the target followup id changes — not when
+  // workspace polls replace the `followup` object with a new identity.
   React.useEffect(() => {
-    if (!open || !followup) {
-      seededForIdRef.current = null;
-      return;
-    }
-    if (seededForIdRef.current === followup.id) return;
-    seededForIdRef.current = followup.id;
+    if (!open || !followup) return;
     const followupSnapshot = followup;
     const recipientSnapshot = recipientOptions;
     const mailboxSnapshot = mailboxOptions;
@@ -239,8 +232,7 @@ export function ScheduleFollowupEmailDialog({
     return () => {
       cancelled = true;
     };
-    // Seed on open / target id only — not on followup object identity churn.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed on open / followup id only
   }, [open, followup?.id]);
 
   React.useEffect(() => {
