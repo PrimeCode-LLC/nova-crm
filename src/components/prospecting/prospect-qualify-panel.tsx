@@ -31,6 +31,8 @@ import {
   type ProspectQualifyFormState,
 } from "@/lib/prospects/prospect-form";
 import { capitalizeSelectToken } from "@/lib/base-ui-select-label";
+import { prospectFieldAnchorId } from "@/lib/prospecting-strategy/qualify-field-focus";
+import { cn } from "@/lib/utils";
 
 const SIGNAL_CATEGORIES = [
   "RFID / asset tracking",
@@ -65,6 +67,7 @@ export function ProspectQualifyPanel({
   outreachThreshold,
   existingContactsForCompany,
   maxContactsPerCompany,
+  fieldErrors,
 }: {
   state: ProspectQualifyFormState;
   onChange: (next: ProspectQualifyFormState) => void;
@@ -77,6 +80,7 @@ export function ProspectQualifyPanel({
   outreachThreshold: number;
   existingContactsForCompany: number;
   maxContactsPerCompany: number;
+  fieldErrors?: Partial<Record<string, string>>;
 }) {
   const gate = evaluateQualifyGate({
     companyName,
@@ -142,7 +146,48 @@ export function ProspectQualifyPanel({
         <p className="text-xs text-muted-foreground">All qualify checks passed.</p>
       )}
 
-      <div className="space-y-3">
+      {(fieldErrors?.do_not_contact ||
+        fieldErrors?.quality_score ||
+        fieldErrors?.max_contacts) && (
+        <div className="space-y-1">
+          {fieldErrors.do_not_contact ? (
+            <p
+              id={prospectFieldAnchorId("do_not_contact")}
+              data-prospect-field="do_not_contact"
+              className="text-xs text-destructive"
+              role="alert"
+            >
+              {fieldErrors.do_not_contact}
+            </p>
+          ) : null}
+          {fieldErrors.quality_score ? (
+            <p
+              id={prospectFieldAnchorId("quality_score")}
+              data-prospect-field="quality_score"
+              className="text-xs text-destructive"
+              role="alert"
+            >
+              {fieldErrors.quality_score}
+            </p>
+          ) : null}
+          {fieldErrors.max_contacts ? (
+            <p
+              id={prospectFieldAnchorId("max_contacts")}
+              data-prospect-field="max_contacts"
+              className="text-xs text-destructive"
+              role="alert"
+            >
+              {fieldErrors.max_contacts}
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      <div
+        id={prospectFieldAnchorId("intent_evidence")}
+        data-prospect-field="intent_evidence"
+        className="space-y-3"
+      >
         <div className="flex items-center justify-between gap-2">
           <Label className="text-sm">Intent evidence</Label>
           <Button
@@ -157,8 +202,19 @@ export function ProspectQualifyPanel({
             Add signal
           </Button>
         </div>
+        {fieldErrors?.intent_evidence ? (
+          <p className="text-xs text-destructive" role="alert">
+            {fieldErrors.intent_evidence}
+          </p>
+        ) : null}
         {state.evidence.map((ev, idx) => (
-          <div key={ev.id} className="rounded-md border bg-muted/20 p-3 space-y-2">
+          <div
+            key={ev.id}
+            className={cn(
+              "rounded-md border bg-muted/20 p-3 space-y-2",
+              fieldErrors?.intent_evidence && "border-destructive/40",
+            )}
+          >
             <div className="flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="text-xs font-medium">Signal {idx + 1}</span>
@@ -262,23 +318,43 @@ export function ProspectQualifyPanel({
         ))}
       </div>
 
-      <div className="space-y-2">
+      <div
+        id={prospectFieldAnchorId("opportunity")}
+        data-prospect-field="opportunity"
+        className="space-y-2"
+      >
         <Label className="text-sm">Primary opportunity</Label>
         <Input
+          aria-invalid={Boolean(fieldErrors?.opportunity) || undefined}
           value={state.primaryOpportunityLabel}
           placeholder="e.g. RFID and IoT · WMS integrations · Operational dashboards"
           onChange={(e) => onChange({ ...state, primaryOpportunityLabel: e.target.value })}
         />
+        {fieldErrors?.opportunity ? (
+          <p className="text-xs text-destructive" role="alert">
+            {fieldErrors.opportunity}
+          </p>
+        ) : null}
       </div>
 
-      <div className="space-y-2">
+      <div
+        id={prospectFieldAnchorId("personalization")}
+        data-prospect-field="personalization"
+        className="space-y-2"
+      >
         <Label className="text-sm">Personalization note</Label>
+        {fieldErrors?.personalization ? (
+          <p className="text-xs text-destructive" role="alert">
+            {fieldErrors.personalization}
+          </p>
+        ) : null}
         <div className="grid gap-2">
           <div className="grid gap-1">
             <Label className="text-xs text-muted-foreground">Trigger</Label>
             <Textarea
               rows={2}
               placeholder="What recently happened?"
+              aria-invalid={Boolean(fieldErrors?.personalization) || undefined}
               value={state.personalization.trigger}
               onChange={(e) =>
                 onChange({

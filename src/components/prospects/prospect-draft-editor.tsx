@@ -26,6 +26,16 @@ import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { useChannelOptions } from "@/hooks/use-channel-options";
 import { countCompanyContactsForUser } from "@/lib/prospecting-strategy/progress";
+import {
+  collapseAccidentalDoubleName,
+  evaluateQualifyGate,
+  type QualifyIssue,
+} from "@/lib/prospecting-strategy/qualify";
+import {
+  firstQualifyFieldCode,
+  issuesToFieldErrors,
+  scrollToProspectField,
+} from "@/lib/prospecting-strategy/qualify-field-focus";
 import { resolveDailyTargets } from "@/lib/prospecting-strategy/types";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import {
@@ -180,6 +190,10 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [qualifyBlockerOpen, setQualifyBlockerOpen] = React.useState(false);
   const [qualifyBlockerMessage, setQualifyBlockerMessage] = React.useState("");
+  const [qualifyBlockerIssues, setQualifyBlockerIssues] = React.useState<QualifyIssue[]>([]);
+  const [fieldErrors, setFieldErrors] = React.useState<Partial<Record<string, string>>>({});
+  const skipQualifyScrollRef = React.useRef(false);
+  const formScrollRef = React.useRef<HTMLDivElement>(null);
   const [discardReason, setDiscardReason] = React.useState("");
   const latestRevisionRef = React.useRef(draft.revision);
   const latestDraftRef = React.useRef(draft);
@@ -329,6 +343,34 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not complete draft.";
       if (message.startsWith("Qualification incomplete:")) {
+        const nextForm = formRef.current;
+        const fullName = collapseAccidentalDoubleName(
+          `${nextForm.firstName} ${nextForm.lastName}`.trim(),
+        );
+        const selected = prospecting.strategies.find((s) => s.id === nextForm.strategyId);
+        const max = resolveDailyTargets(selected).maxContactsPerCompany ?? 2;
+        const gate = evaluateQualifyGate({
+          companyName: nextForm.bizName.trim(),
+          companyWebsite: nextForm.website.trim(),
+          contactName: fullName,
+          contactTitle: nextForm.title.trim(),
+          contactLinkedIn: nextForm.linkedin.trim(),
+          emailVerified: nextForm.emailVerify === "verified",
+          intentEvidence: nextForm.qualifyForm.evidence,
+          personalizationNote: nextForm.qualifyForm.personalization,
+          primaryOpportunityLabel: nextForm.qualifyForm.primaryOpportunityLabel,
+          outreachThreshold: intentPlaybook.outreachThreshold,
+          existingContactsForCompany: countCompanyContactsForUser(
+            leads,
+            currentUserId,
+            domainFromWebsiteOrEmail(nextForm.website, nextForm.email),
+            nextForm.bizName,
+          ),
+          maxContactsPerCompany: max,
+        });
+        const blocking = gate.issues.filter((i) => i.blocking);
+        setQualifyBlockerIssues(blocking);
+        setFieldErrors(issuesToFieldErrors(blocking));
         setQualifyBlockerMessage(message.replace("Qualification incomplete:", "").trim());
         setQualifyBlockerOpen(true);
       } else {
@@ -453,41 +495,70 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
           <CardTitle>Prospect fields</CardTitle>
         </CardHeader>
         <CardContent>
-          <ProspectFormSections
-            values={form}
-            onChange={(next, changedKey) => {
-              if (next.strategyId !== form.strategyId) {
-                const assignment = prospecting.assignments.find(
-                  (item) =>
-                    item.userId === currentUserId &&
-                    item.strategyId === next.strategyId &&
-                    item.status === "active",
-                );
-                next = {
-                  ...next,
-                  strategyAssignmentId: assignment?.id ?? "",
-                };
-              }
-              formRef.current = next;
-              setForm(next);
-              if (changedKey) {
-                setSaveState("unsaved");
-                markReviewed(changedKey);
-              }
-            }}
-            channelOptions={channelOptions}
-            profiles={profiles}
-            strategies={prospecting.strategies.filter(
-              (strategy) => strategy.status === "published" || strategy.status === "draft",
-            )}
-            personas={prospecting.personas.filter(
-              (persona) => selectedStrategy?.personaIds.includes(persona.id),
-            )}
-            outreachThreshold={intentPlaybook.outreachThreshold}
-            existingContactsForCompany={existingContacts}
-            maxContactsPerCompany={maxContacts}
-            renderAnnotation={(key) => <DraftAnnotation draft={currentDraft} fieldKey={key} />}
-          />
+          <div ref={formScrollRef}>
+            <ProspectFormSections
+              values={form}
+              onChange={(next, changedKey) => {
+                if (next.strategyId !== form.strategyId) {
+                  const assignment = prospecting.assignments.find(
+                    (item) =>
+                      item.userId === currentUserId &&
+                      item.strategyId === next.strategyId &&
+                      item.status === "active",
+                  );
+                  next = {
+                    ...next,
+                    strategyAssignmentId: assignment?.id ?? "",
+                  };
+                }
+                formRef.current = next;
+                setForm(next);
+                setFieldErrors((prev) => {
+                  if (!Object.keys(prev).length) return prev;
+                  const fullName = collapseAccidentalDoubleName(
+                    `${next.firstName} ${next.lastName}`.trim(),
+                  );
+                  const gate = evaluateQualifyGate({
+                    companyName: next.bizName.trim(),
+                    companyWebsite: next.website.trim(),
+                    contactName: fullName,
+                    contactTitle: next.title.trim(),
+                    contactLinkedIn: next.linkedin.trim(),
+                    emailVerified: next.emailVerify === "verified",
+                    intentEvidence: next.qualifyForm.evidence,
+                    personalizationNote: next.qualifyForm.personalization,
+                    primaryOpportunityLabel: next.qualifyForm.primaryOpportunityLabel,
+                    outreachThreshold: intentPlaybook.outreachThreshold,
+                    existingContactsForCompany: existingContacts,
+                    maxContactsPerCompany: maxContacts,
+                  });
+                  const stillBlocking = issuesToFieldErrors(gate.issues);
+                  const nextErrors: Partial<Record<string, string>> = {};
+                  for (const code of Object.keys(prev)) {
+                    if (stillBlocking[code]) nextErrors[code] = stillBlocking[code];
+                  }
+                  return nextErrors;
+                });
+                if (changedKey) {
+                  setSaveState("unsaved");
+                  markReviewed(changedKey);
+                }
+              }}
+              channelOptions={channelOptions}
+              profiles={profiles}
+              strategies={prospecting.strategies.filter(
+                (strategy) => strategy.status === "published" || strategy.status === "draft",
+              )}
+              personas={prospecting.personas.filter(
+                (persona) => selectedStrategy?.personaIds.includes(persona.id),
+              )}
+              outreachThreshold={intentPlaybook.outreachThreshold}
+              existingContactsForCompany={existingContacts}
+              maxContactsPerCompany={maxContacts}
+              fieldErrors={fieldErrors}
+              renderAnnotation={(key) => <DraftAnnotation draft={currentDraft} fieldKey={key} />}
+            />
+          </div>
         </CardContent>
       </Card>
 
@@ -684,17 +755,42 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <AlertDialog open={qualifyBlockerOpen} onOpenChange={setQualifyBlockerOpen}>
+      <AlertDialog
+        open={qualifyBlockerOpen}
+        onOpenChange={(open) => {
+          setQualifyBlockerOpen(open);
+          if (open) return;
+          if (skipQualifyScrollRef.current) {
+            skipQualifyScrollRef.current = false;
+            return;
+          }
+          const first = firstQualifyFieldCode(qualifyBlockerIssues);
+          if (!first) return;
+          window.setTimeout(() => {
+            scrollToProspectField(first, formScrollRef.current);
+          }, 50);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Qualification not complete</AlertDialogTitle>
             <AlertDialogDescription>{qualifyBlockerMessage}</AlertDialogDescription>
+            {qualifyBlockerIssues.length ? (
+              <ul className="list-disc space-y-1 pl-4 text-sm text-destructive">
+                {qualifyBlockerIssues.map((issue) => (
+                  <li key={issue.code}>{issue.message}</li>
+                ))}
+              </ul>
+            ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={Boolean(busy)}>Keep editing</AlertDialogCancel>
             <AlertDialogAction
               disabled={Boolean(busy)}
               onClick={() => {
+                skipQualifyScrollRef.current = true;
+                setQualifyBlockerOpen(false);
+                setFieldErrors({});
                 setBusy("complete");
                 void requestCompletion(true)
                   .catch((error) => {

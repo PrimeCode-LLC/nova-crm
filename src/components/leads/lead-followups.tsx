@@ -200,6 +200,9 @@ function FollowupRow({
   const [hydratedBody, setHydratedBody] = React.useState<string | undefined>(f.messageBody);
   const chLabel = channelBadgeLabel(f.channel);
   const isScheduled = Boolean(f.scheduledEmailId && f.emailScheduledAt);
+  /** Prefer send time when scheduled — dueAt can lag after reschedule. */
+  const displayAt =
+    isScheduled && f.emailScheduledAt ? f.emailScheduledAt : f.dueAt;
   const isFailed = f.deliveryStatus === "failed";
   const isRetrying = f.deliveryStatus === "needs_retry";
   const channelSupportsEmail = isFollowupEmailChannel(f, leadChannel);
@@ -355,9 +358,14 @@ function FollowupRow({
               "flex items-center gap-1 text-xs tabular-nums",
               overdue ? "text-destructive" : "text-muted-foreground",
             )}
+            title={
+              isScheduled && f.emailScheduledAt
+                ? `Sends ${formatInstantInZone(f.emailScheduledAt, timeZone)}`
+                : undefined
+            }
           >
             <Clock className="h-3 w-3" />
-            {fmtDate(f.dueAt, "MMM d")} · {fmtRelative(f.dueAt)}
+            {fmtDate(displayAt, "MMM d")} · {fmtRelative(displayAt)}
           </span>
           {hasBody ? (
             <Button

@@ -42,6 +42,11 @@ import {
   collapseAccidentalDoubleName,
   type QualifyIssue,
 } from "@/lib/prospecting-strategy/qualify";
+import {
+  firstQualifyFieldCode,
+  issuesToFieldErrors,
+  scrollToProspectField,
+} from "@/lib/prospecting-strategy/qualify-field-focus";
 import { resolveDailyTargets } from "@/lib/prospecting-strategy/types";
 import { ProspectFormSections } from "@/components/prospects/prospect-form-sections";
 import {
@@ -136,6 +141,9 @@ export function NewProspectDialog({
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [qualifyBlockerOpen, setQualifyBlockerOpen] = React.useState(false);
   const [qualifyBlockerIssues, setQualifyBlockerIssues] = React.useState<QualifyIssue[]>([]);
+  const [fieldErrors, setFieldErrors] = React.useState<Partial<Record<string, string>>>({});
+  const skipQualifyScrollRef = React.useRef(false);
+  const formScrollRef = React.useRef<HTMLDivElement>(null);
   const [baselineSerialized, setBaselineSerialized] = React.useState(emptyBaseline);
   const wasOpenRef = React.useRef(false);
   const restoredToastShownRef = React.useRef(false);
@@ -190,10 +198,48 @@ export function NewProspectDialog({
 
   const handleFormChange = React.useCallback((next: NewProspectFormDraft) => {
     setForm(next);
-  }, []);
+    setFieldErrors((prev) => {
+      if (!Object.keys(prev).length) return prev;
+      const fullName = collapseAccidentalDoubleName(
+        `${next.firstName} ${next.lastName}`.trim(),
+      );
+      const gate = evaluateQualifyGate({
+        companyName: next.bizName.trim(),
+        companyWebsite: next.website.trim(),
+        contactName: fullName,
+        contactTitle: next.title.trim(),
+        contactLinkedIn: next.linkedin.trim(),
+        emailVerified: next.emailVerify === "verified",
+        intentEvidence: next.qualifyForm.evidence,
+        personalizationNote: next.qualifyForm.personalization,
+        primaryOpportunityLabel: next.qualifyForm.primaryOpportunityLabel,
+        outreachThreshold: intentPlaybook.outreachThreshold,
+        existingContactsForCompany: countCompanyContactsForUser(
+          leads,
+          currentUserId,
+          domainFromWebsiteOrEmail(next.website, next.email),
+          next.bizName,
+        ),
+        maxContactsPerCompany: maxContacts,
+      });
+      const stillBlocking = issuesToFieldErrors(gate.issues);
+      const nextErrors: Partial<Record<string, string>> = {};
+      for (const code of Object.keys(prev)) {
+        if (stillBlocking[code]) nextErrors[code] = stillBlocking[code];
+      }
+      return nextErrors;
+    });
+  }, [
+    currentUserId,
+    intentPlaybook.outreachThreshold,
+    leads,
+    maxContacts,
+  ]);
 
   const resetForm = React.useCallback(() => {
     setForm(emptyNewProspectFormDraft());
+    setFieldErrors({});
+    setQualifyBlockerIssues([]);
   }, []);
 
   const syncBaseline = React.useCallback(() => {
@@ -569,7 +615,9 @@ export function NewProspectDialog({
       });
       if (!gate.ok) {
         if (!skipQualifyGate) {
-          setQualifyBlockerIssues(gate.issues.filter((i) => i.blocking));
+          const blocking = gate.issues.filter((i) => i.blocking);
+          setQualifyBlockerIssues(blocking);
+          setFieldErrors(issuesToFieldErrors(blocking));
           setQualifyBlockerOpen(true);
           return;
         }
@@ -831,7 +879,10 @@ export function NewProspectDialog({
               </p>
             </DialogHeader>
 
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-6">
+            <div
+              ref={formScrollRef}
+              className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-6"
+            >
               <ProspectFormSections
                 values={form}
                 onChange={handleFormChange}
@@ -842,6 +893,7 @@ export function NewProspectDialog({
                 outreachThreshold={intentPlaybook.outreachThreshold}
                 existingContactsForCompany={existingContactsForCompany}
                 maxContactsPerCompany={maxContacts}
+                fieldErrors={fieldErrors}
               />
             </div>
 
@@ -883,7 +935,23 @@ export function NewProspectDialog({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={qualifyBlockerOpen} onOpenChange={setQualifyBlockerOpen}>
+      <AlertDialog
+        open={qualifyBlockerOpen}
+        onOpenChange={(open) => {
+          setQualifyBlockerOpen(open);
+          if (open) return;
+          if (skipQualifyScrollRef.current) {
+            skipQualifyScrollRef.current = false;
+            return;
+          }
+          const first = firstQualifyFieldCode(qualifyBlockerIssues);
+          if (!first) return;
+          // Wait for the alert to unmount so the form scroll container can move.
+          window.setTimeout(() => {
+            scrollToProspectField(first, formScrollRef.current);
+          }, 50);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Qualification not complete</AlertDialogTitle>
@@ -904,7 +972,9 @@ export function NewProspectDialog({
             <AlertDialogAction
               disabled={submitting}
               onClick={() => {
+                skipQualifyScrollRef.current = true;
                 setQualifyBlockerOpen(false);
+                setFieldErrors({});
                 void createProspect(true);
               }}
             >

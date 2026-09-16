@@ -55,6 +55,7 @@ import type {
   WebsiteStatus,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { prospectFieldAnchorId } from "@/lib/prospecting-strategy/qualify-field-focus";
 
 const BUSINESS_STATUS_OPTIONS: Array<{ value: BusinessStatus; label: string }> = [
   { value: "active", label: "Active" },
@@ -120,6 +121,8 @@ type Props = {
   renderAnnotation?: (key: AnnotationKey) => React.ReactNode;
   /** When set (saved prospect), show Million Verifier control next to email status. */
   verifyLeadId?: string;
+  /** Blocking qualify-gate messages keyed by issue code. */
+  fieldErrors?: Partial<Record<string, string>>;
 };
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -131,19 +134,34 @@ function Field({
   annotation,
   children,
   wide,
+  error,
+  fieldCode,
 }: {
   label: string;
   annotation?: React.ReactNode;
   children: React.ReactNode;
   wide?: boolean;
+  error?: string;
+  /** Qualify-gate / validation anchor (data-prospect-field). */
+  fieldCode?: string;
 }) {
+  const anchorId = fieldCode ? prospectFieldAnchorId(fieldCode) : undefined;
   return (
-    <div className={cn("grid min-w-0 gap-1.5", wide && "sm:col-span-2")}>
+    <div
+      id={anchorId}
+      data-prospect-field={fieldCode}
+      className={cn("grid min-w-0 gap-1.5", wide && "sm:col-span-2")}
+    >
       <div className="flex items-center justify-between gap-2">
         <Label>{label}</Label>
         {annotation}
       </div>
       {children}
+      {error ? (
+        <p className="text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -160,6 +178,7 @@ export function ProspectFormSections({
   maxContactsPerCompany,
   renderAnnotation,
   verifyLeadId,
+  fieldErrors,
 }: Props) {
   const [verifyingEmail, setVerifyingEmail] = React.useState(false);
   const valuesRef = React.useRef(values);
@@ -428,8 +447,19 @@ export function ProspectFormSections({
           </Button>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
-          <Field label="Business name" annotation={renderAnnotation?.("companyName")} wide>
-            <Input required value={values.bizName} onChange={(event) => update("bizName", event.target.value, "companyName")} />
+          <Field
+            label="Business name"
+            annotation={renderAnnotation?.("companyName")}
+            wide
+            fieldCode="company_name"
+            error={fieldErrors?.company_name}
+          >
+            <Input
+              required
+              aria-invalid={Boolean(fieldErrors?.company_name)}
+              value={values.bizName}
+              onChange={(event) => update("bizName", event.target.value, "companyName")}
+            />
           </Field>
           <Field label="Industry" annotation={renderAnnotation?.("industry")}>
             <Input value={values.industry} onChange={(event) => update("industry", event.target.value, "industry")} />
@@ -446,12 +476,19 @@ export function ProspectFormSections({
           <Field label="Country" annotation={renderAnnotation?.("country")}>
             <Input value={values.country} onChange={(event) => update("country", event.target.value, "country")} />
           </Field>
-          <Field label="Website URL" annotation={renderAnnotation?.("companyWebsite")} wide>
+          <Field
+            label="Website URL"
+            annotation={renderAnnotation?.("companyWebsite")}
+            wide
+            fieldCode="company_website"
+            error={fieldErrors?.company_website}
+          >
             <Input
               type="text"
               inputMode="url"
               autoComplete="url"
               placeholder="example.com or https://example.com"
+              aria-invalid={Boolean(fieldErrors?.company_website)}
               value={values.website}
               onChange={(event) => update("website", event.target.value, "companyWebsite")}
               onBlur={(event) => {
@@ -537,14 +574,34 @@ export function ProspectFormSections({
       <section className="space-y-3">
         <SectionTitle>Contact</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
-          <Field label="First name" annotation={renderAnnotation?.("firstName")}>
-            <Input required value={values.firstName} onChange={(event) => update("firstName", event.target.value, "firstName")} />
+          <Field
+            label="First name"
+            annotation={renderAnnotation?.("firstName")}
+            fieldCode="contact_name"
+            error={fieldErrors?.contact_name}
+          >
+            <Input
+              required
+              aria-invalid={Boolean(fieldErrors?.contact_name)}
+              value={values.firstName}
+              onChange={(event) => update("firstName", event.target.value, "firstName")}
+            />
           </Field>
           <Field label="Last name" annotation={renderAnnotation?.("lastName")}>
             <Input required value={values.lastName} onChange={(event) => update("lastName", event.target.value, "lastName")} />
           </Field>
-          <Field label="Role / title" annotation={renderAnnotation?.("contactTitle")} wide>
-            <Input value={values.title} onChange={(event) => update("title", event.target.value, "contactTitle")} />
+          <Field
+            label="Role / title"
+            annotation={renderAnnotation?.("contactTitle")}
+            wide
+            fieldCode="contact_title"
+            error={fieldErrors?.contact_title}
+          >
+            <Input
+              aria-invalid={Boolean(fieldErrors?.contact_title)}
+              value={values.title}
+              onChange={(event) => update("title", event.target.value, "contactTitle")}
+            />
           </Field>
           <Field label="Seniority">
             <Input value={values.seniority} onChange={(event) => update("seniority", event.target.value)} />
@@ -558,12 +615,17 @@ export function ProspectFormSections({
           <Field label="Personal email">
             <Input type="email" value={values.personalEmail} onChange={(event) => update("personalEmail", event.target.value)} />
           </Field>
-          <Field label="Email verified">
+          <Field
+            label="Email verified"
+            fieldCode="verified_email"
+            error={fieldErrors?.verified_email}
+          >
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
                 <SimpleSelect
                   value={values.emailVerify}
                   options={EMAIL_OPTIONS}
+                  invalid={Boolean(fieldErrors?.verified_email)}
                   onChange={(value) =>
                     update("emailVerify", value as ProspectFormValues["emailVerify"])
                   }
@@ -597,12 +659,19 @@ export function ProspectFormSections({
           <Field label="Best contact channel">
             <SimpleSelect value={values.bestChannel} options={BEST_CHANNEL_OPTIONS} onChange={(value) => update("bestChannel", value as ProspectFormValues["bestChannel"])} />
           </Field>
-          <Field label="LinkedIn profile URL" annotation={renderAnnotation?.("contactLinkedIn")} wide>
+          <Field
+            label="LinkedIn profile URL"
+            annotation={renderAnnotation?.("contactLinkedIn")}
+            wide
+            fieldCode="contact_linkedin"
+            error={fieldErrors?.contact_linkedin}
+          >
             <Input
               type="text"
               inputMode="url"
               autoComplete="url"
               placeholder="linkedin.com/in/…"
+              aria-invalid={Boolean(fieldErrors?.contact_linkedin)}
               value={values.linkedin}
               onChange={(event) => update("linkedin", event.target.value, "contactLinkedIn")}
               onBlur={(event) => {
@@ -626,6 +695,7 @@ export function ProspectFormSections({
         outreachThreshold={outreachThreshold}
         existingContactsForCompany={existingContactsForCompany}
         maxContactsPerCompany={maxContactsPerCompany}
+        fieldErrors={fieldErrors}
       />
     </div>
   );
@@ -635,14 +705,16 @@ function SimpleSelect({
   value,
   options,
   onChange,
+  invalid,
 }: {
   value: string;
   options: Array<{ value: string; label: string }>;
   onChange: (value: string) => void;
+  invalid?: boolean;
 }) {
   return (
     <Select value={value} onValueChange={(next) => next && onChange(next)}>
-      <SelectTrigger>
+      <SelectTrigger aria-invalid={invalid || undefined}>
         <SelectValue placeholder="Not set">
           {value === PROSPECT_FORM_UNSET
             ? "Not set"
