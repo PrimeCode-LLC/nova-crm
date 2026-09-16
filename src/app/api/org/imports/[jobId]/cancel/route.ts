@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/db/document-access/admin";
-import { getUnsafeLocalImportError } from "@/lib/imports/prospect-import-runtime";
 import { cancelProspectImportJob } from "@/lib/imports/prospect-import-server";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
+import { isQueueImportChunksV1Enabled } from "@/lib/queue/flags";
 
 export async function POST(
   _req: Request,
@@ -19,7 +19,8 @@ export async function POST(
       organizationId: guard.ctx.session.organizationId,
       uploaderId: guard.ctx.session.uid,
       jobId,
-      finalizeImmediately: Boolean(getUnsafeLocalImportError()),
+      // Without the import-chunk worker, finalize cancel inline (no BullMQ consumer).
+      finalizeImmediately: !isQueueImportChunksV1Enabled(),
     });
     return NextResponse.json({ ok: true, status });
   } catch (error) {

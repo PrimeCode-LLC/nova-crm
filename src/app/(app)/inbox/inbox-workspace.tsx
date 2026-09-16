@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { PageBody, PageHeader } from "@/components/common/page-header";
+import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -3419,7 +3419,69 @@ export default function InboxWorkspace() {
   ]);
 
   const pageActions = (
-    <div className="flex gap-2 flex-wrap">
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
+        {canViewMemberMailboxes && !isDemo ? (
+          <Select
+            value={mailViewAsUid ?? INBOX_VIEW_SELF}
+            onValueChange={(v) => {
+              if (!v || v === INBOX_VIEW_SELF) setMailViewAsUid(null);
+              else setMailViewAsUid(v);
+            }}
+          >
+            <SelectTrigger className="h-8 w-[160px] shrink-0 text-xs sm:w-[180px]">
+              <SelectValue placeholder="Whose inbox?">
+                {(value) => {
+                  if (value == null || value === INBOX_VIEW_SELF) return "My mailbox";
+                  const u =
+                    memberPickerUsers.find((x) => x.id === value) ??
+                    users.find((x) => x.id === value);
+                  return u
+                    ? workspaceMemberPickerLabel(u, getOwnerDisplayName, { includeRole: true })
+                    : fallbackOwnerPickerLabel(String(value));
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={INBOX_VIEW_SELF}>My mailbox</SelectItem>
+              {memberPickerUsers.map((u) => (
+                <SelectItem key={u.id} value={u.id}>
+                  {workspaceMemberPickerLabel(u, getOwnerDisplayName, { includeRole: true })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+        <Select
+          value={activeMailboxId || ALL_MAILBOXES_ID}
+          onValueChange={(v) => {
+            if (v) {
+              setActiveMailbox(v);
+              setSelectedRowMailboxId(null);
+              setSelectedThread(null);
+              setSelectedMail(null);
+              setSelectedScheduled(null);
+              clearMailRowSelection();
+            }
+          }}
+        >
+          <SelectTrigger className="h-8 w-[160px] shrink-0 text-xs sm:w-[180px]">
+            <SelectValue placeholder="Select mailbox">
+              {allMailboxesSelected ? "All mailboxes" : mailboxDisplayLabel(account)}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_MAILBOXES_ID}>
+              <span className="font-medium">All mailboxes</span>
+            </SelectItem>
+            {mailboxes.map((mb) => (
+              <SelectItem key={mb.id} value={mb.id}>
+                {mailboxDisplayLabel(mb)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       <Button
         type="button"
         variant="outline"
@@ -3691,7 +3753,7 @@ export default function InboxWorkspace() {
   }
 
   return (
-    <>
+    <AppPage>
       <PageHeader
         title="Inbox"
         description={
@@ -3699,107 +3761,51 @@ export default function InboxWorkspace() {
             ? inboxReadOnly
               ? `Viewing mail for ${getOwnerDisplayName(mailViewAsUid) ?? "a teammate"}, read only.`
               : `Viewing and sending mail for ${getOwnerDisplayName(mailViewAsUid) ?? "a teammate"}.`
-            : "Threaded conversations (like Outlook) from the mailbox you connect in settings."
+            : "Threaded conversations from your connected mailbox."
         }
         actions={pageActions}
+        className="gap-1.5 px-4 py-2.5 sm:items-center"
       />
-      <PageBody className="flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden p-0">
-        <div className="shrink-0 border-b px-4 pt-3 pb-2 flex flex-wrap items-center gap-2">
-          {inboxReadOnly && mailViewAsUid ? (
-            <p className="text-[11px] text-amber-700 dark:text-amber-500 max-w-[42rem]">
-              You are viewing another member&apos;s connected inbox in read-only mode. Compose, trash, bulk
-              actions, and linking threads to leads are disabled.
-            </p>
-          ) : null}
-          {!inboxReadOnly && mailViewAsUid ? (
-            <p className="text-[11px] text-muted-foreground max-w-[42rem]">
-              You have shared send access to this inbox. Messages send from the owner&apos;s connected mailbox.
-            </p>
-          ) : null}
-          {!isEmailAccountConfigured(account) && (
-            <p className="text-[11px] text-muted-foreground">
-              SMTP not fully configured, you can still compose drafts;{" "}
-              <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
-                open Email settings
-              </Link>{" "}
-              to send.
-            </p>
-          )}
-          {isEmailAccountConfigured(account) && !isImapInboxConfigured(account) && (
-            <p className="text-[11px] text-muted-foreground">
-              Add IMAP host in{" "}
-              <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
-                Email settings
-              </Link>{" "}
-              to load incoming mail.
-            </p>
-          )}
-          <div className="ml-auto flex flex-wrap items-center gap-2 justify-end">
-            {canViewMemberMailboxes && !isDemo ? (
-              <Select
-                value={mailViewAsUid ?? INBOX_VIEW_SELF}
-                onValueChange={(v) => {
-                  if (!v || v === INBOX_VIEW_SELF) setMailViewAsUid(null);
-                  else setMailViewAsUid(v);
-                }}
-              >
-                <SelectTrigger className="h-8 min-w-[200px] max-w-[min(100%,280px)] text-xs">
-                  <SelectValue placeholder="Whose inbox?">
-                    {(value) => {
-                      if (value == null || value === INBOX_VIEW_SELF) return "My mailbox";
-                      const u =
-                        memberPickerUsers.find((x) => x.id === value) ??
-                        users.find((x) => x.id === value);
-                      return u
-                        ? workspaceMemberPickerLabel(u, getOwnerDisplayName, { includeRole: true })
-                        : fallbackOwnerPickerLabel(String(value));
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={INBOX_VIEW_SELF}>My mailbox</SelectItem>
-                  {memberPickerUsers.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {workspaceMemberPickerLabel(u, getOwnerDisplayName, { includeRole: true })}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+      <PageBody contained className="gap-0 p-0">
+        {(inboxReadOnly && mailViewAsUid) ||
+        (!inboxReadOnly && mailViewAsUid) ||
+        !isEmailAccountConfigured(account) ||
+        (isEmailAccountConfigured(account) && !isImapInboxConfigured(account)) ? (
+          <div className="shrink-0 space-y-1 border-b px-4 py-1.5">
+            {inboxReadOnly && mailViewAsUid ? (
+              <p className="text-[11px] text-amber-700 dark:text-amber-500 max-w-[42rem]">
+                You are viewing another member&apos;s connected inbox in read-only mode. Compose, trash, bulk
+                actions, and linking threads to leads are disabled.
+              </p>
             ) : null}
-            <Select
-              value={activeMailboxId || ALL_MAILBOXES_ID}
-              onValueChange={(v) => {
-                if (v) {
-                  setActiveMailbox(v);
-                  setSelectedRowMailboxId(null);
-                  setSelectedThread(null);
-                  setSelectedMail(null);
-                  setSelectedScheduled(null);
-                  clearMailRowSelection();
-                }
-              }}
-            >
-              <SelectTrigger className="h-8 min-w-[200px] max-w-[min(100%,280px)]">
-                <SelectValue placeholder="Select mailbox">
-                  {allMailboxesSelected ? "All mailboxes" : mailboxDisplayLabel(account)}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL_MAILBOXES_ID}>
-                  <span className="font-medium">All mailboxes</span>
-                </SelectItem>
-                {mailboxes.map((mb) => (
-                  <SelectItem key={mb.id} value={mb.id}>
-                    {mailboxDisplayLabel(mb)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {!inboxReadOnly && mailViewAsUid ? (
+              <p className="text-[11px] text-muted-foreground max-w-[42rem]">
+                You have shared send access to this inbox. Messages send from the owner&apos;s connected mailbox.
+              </p>
+            ) : null}
+            {!isEmailAccountConfigured(account) && (
+              <p className="text-[11px] text-muted-foreground">
+                SMTP not fully configured, you can still compose drafts;{" "}
+                <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
+                  open Email settings
+                </Link>{" "}
+                to send.
+              </p>
+            )}
+            {isEmailAccountConfigured(account) && !isImapInboxConfigured(account) && (
+              <p className="text-[11px] text-muted-foreground">
+                Add IMAP host in{" "}
+                <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
+                  Email settings
+                </Link>{" "}
+                to load incoming mail.
+              </p>
+            )}
           </div>
-        </div>
+        ) : null}
 
-        <div className="flex min-h-0 flex-1 divide-x h-[calc(100vh-12rem)] max-h-[calc(100vh-12rem)]">
-            <div className="w-52 shrink-0 flex flex-col border-r p-2 gap-1 overflow-y-auto max-h-[calc(100vh-250px)]">
+        <div className="flex min-h-0 flex-1 divide-x">
+            <div className="flex w-52 shrink-0 flex-col gap-1 overflow-y-auto border-r p-2">
               <div className="space-y-2 pb-2 border-b border-border/60">
                 <p className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                   Filter by CRM
@@ -3979,7 +3985,7 @@ export default function InboxWorkspace() {
               </div>
             </div>
 
-            <div className="w-full max-w-md flex flex-col border-r max-h-[calc(100vh-250px)] overflow-y-auto">
+            <div className="flex w-full max-w-md min-h-0 flex-col overflow-hidden border-r">
               <div className="px-3 py-2 border-b text-xs font-medium text-muted-foreground capitalize space-y-2">
                 <div className="flex items-center justify-between gap-2 normal-case">
                   <span>
@@ -5584,7 +5590,7 @@ export default function InboxWorkspace() {
           toast.success("Improved draft applied");
         }}
       />
-    </>
+    </AppPage>
   );
 }
 

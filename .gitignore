@@ -21,6 +21,9 @@
 functions/lib/
 functions/node_modules/
 
+# Browser extension (local install deps; dist is built separately)
+extension/node_modules/
+
 # production
 /build
 /extension/dist/
