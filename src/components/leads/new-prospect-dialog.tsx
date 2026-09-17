@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Form } from "@/components/ui/form";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { getClientDb } from "@/lib/db/document-access/client";
 import { persistLeadGraphClient } from "@/lib/documents/persist-lead-graph-client";
@@ -50,17 +52,8 @@ import {
 import { resolveDailyTargets } from "@/lib/prospecting-strategy/types";
 import { ProspectFormSections } from "@/components/prospects/prospect-form-sections";
 import {
-  acknowledgeLegacyDraftMigration,
-  clearNewProspectDraft,
   emptyNewProspectFormDraft,
-  isNewProspectFormDraftEmpty,
-  loadNewProspectDraft,
   mergePrefillIntoDraft,
-  PENDING_PROSPECT_DRAFT_ID,
-  pendingProspectDraftId,
-  saveNewProspectDraft,
-  serializeNewProspectDraft,
-  type NewProspectFormDraft,
 } from "@/lib/new-prospect-form-draft";
 import {
   prospectFormFromDraft,
@@ -72,9 +65,8 @@ import {
   isValidOptionalHttpUrl,
   normalizeProspectFormUrlFields,
   normalizedEmail,
+  type ProspectFormValues,
 } from "@/lib/prospects/prospect-form";
-
-const AUTOSAVE_MS = 800;
 
 function newEntityId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -90,8 +82,13 @@ function newTimelineEventId(): string {
   return `te-${Date.now()}`;
 }
 
-function emptyBaseline(): string {
-  return serializeNewProspectDraft(emptyNewProspectFormDraft());
+function errorMessage(error: unknown, fallback: string): string {
+  if (typeof error === "string" && error.trim()) return error;
+  if (error && typeof error === "object" && "formErrors" in error) {
+    const formErrors = (error as { formErrors?: string[] }).formErrors?.filter(Boolean) ?? [];
+    if (formErrors.length) return formErrors.join(" ");
+  }
+  return fallback;
 }
 
 export function NewProspectDialog({
@@ -104,7 +101,6 @@ export function NewProspectDialog({
   launch?: NewProspectLaunch;
 }) {
   const initialPrefill = launch?.prefill;
-  const pendingRecoveryId = React.useMemo(() => pendingProspectDraftId(launch), [launch]);
   const router = useRouter();
   const {
     currentUserId,
@@ -122,35 +118,36 @@ export function NewProspectDialog({
     intentPlaybook,
   } = useWorkspace();
   const channelOptions = useChannelOptions();
-  /** Prefer workspace uid for drafts and ownership (Clerk + Postgres). */
   const effectiveUid = currentUserId || undefined;
 
-  const [form, setForm] = React.useState<NewProspectFormDraft>(() =>
-    mergePrefillIntoDraft(emptyNewProspectFormDraft(), initialPrefill),
-  );
-  const formRef = React.useRef(form);
-  formRef.current = form;
+  const form = useForm<ProspectFormValues>({
+    defaultValues: mergePrefillIntoDraft(emptyNewProspectFormDraft(), initialPrefill),
+  });
 
   const [submitting, setSubmitting] = React.useState(false);
   const [draftId, setDraftId] = React.useState(launch?.draftId);
   const [draftSaveState, setDraftSaveState] = React.useState<
-    "idle" | "saving" | "saved" | "offline" | "conflict" | "error"
+    "idle" | "saving" | "saved" | "conflict" | "error"
   >("idle");
   const [lastSavedAt, setLastSavedAt] = React.useState<string>();
-  const [draftInitialized, setDraftInitialized] = React.useState(false);
+  const [ready, setReady] = React.useState(!launch?.draftId);
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [qualifyBlockerOpen, setQualifyBlockerOpen] = React.useState(false);
   const [qualifyBlockerIssues, setQualifyBlockerIssues] = React.useState<QualifyIssue[]>([]);
   const [fieldErrors, setFieldErrors] = React.useState<Partial<Record<string, string>>>({});
+  const [loadError, setLoadError] = React.useState<string>();
+  const [resumeAttempt, setResumeAttempt] = React.useState(0);
   const skipQualifyScrollRef = React.useRef(false);
   const formScrollRef = React.useRef<HTMLDivElement>(null);
-  const [baselineSerialized, setBaselineSerialized] = React.useState(emptyBaseline);
-  const wasOpenRef = React.useRef(false);
-  const restoredToastShownRef = React.useRef(false);
   const draftIdRef = React.useRef<string | undefined>(launch?.draftId);
   const draftRevisionRef = React.useRef<number | undefined>(undefined);
   const saveQueueRef = React.useRef<Promise<void>>(Promise.resolve());
-  const createIdempotencyKeyRef = React.useRef(crypto.randomUUID());
+  const submittingRef = React.useRef(false);
+  const createIdempotencyKeyRef = React.useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `prospect-${Date.now()}`,
+  );
 
   const prospecting = useProspectingStrategyData();
   const myActiveAssignments = React.useMemo(
@@ -158,117 +155,97 @@ export function NewProspectDialog({
     [prospecting.assignments, currentUserId],
   );
   const selectableStrategies = React.useMemo(() => {
-    const ids = new Set(myActiveAssignments.map((a) => a.strategyId));
+    const ids = new Set(myActiveAssignments.map((assignment) => assignment.strategyId));
     const fromAssign = prospecting.strategies.filter(
-      (s) => ids.has(s.id) && s.status === "published",
+      (strategy) => ids.has(strategy.id) && strategy.status === "published",
     );
     if (fromAssign.length) return fromAssign;
-    return prospecting.strategies.filter((s) => s.status === "published" || s.status === "draft");
+    return prospecting.strategies.filter(
+      (strategy) => strategy.status === "published" || strategy.status === "draft",
+    );
   }, [myActiveAssignments, prospecting.strategies]);
-  const selectedStrategy = React.useMemo(
-    () => selectableStrategies.find((s) => s.id === form.strategyId),
-    [selectableStrategies, form.strategyId],
-  );
-  const strategyPersonas = React.useMemo(() => {
-    if (!selectedStrategy) return [];
-    const assignment = myActiveAssignments.find((a) => a.strategyId === selectedStrategy.id);
-    const pids = assignment?.personaIdsOverride?.length
-      ? assignment.personaIdsOverride
-      : selectedStrategy.personaIds;
-    return prospecting.personas.filter((p) => pids.includes(p.id) && p.active);
-  }, [selectedStrategy, myActiveAssignments, prospecting.personas]);
 
-  const maxContacts = resolveDailyTargets(selectedStrategy).maxContactsPerCompany ?? 2;
-
-  const companyDomain = React.useMemo(
-    () => domainFromWebsiteOrEmail(form.website, form.email),
-    [form.website, form.email],
-  );
-  const existingContactsForCompany = React.useMemo(
-    () => countCompanyContactsForUser(leads, currentUserId, companyDomain, form.bizName),
-    [leads, currentUserId, companyDomain, form.bizName],
-  );
-
-  const formSerialized = React.useMemo(() => serializeNewProspectDraft(form), [form]);
-  const isDirty = formSerialized !== baselineSerialized;
-
-  const applyDraft = React.useCallback((draft: NewProspectFormDraft) => {
-    setForm(draft);
-  }, []);
-
-  const handleFormChange = React.useCallback((next: NewProspectFormDraft) => {
-    setForm(next);
-    setFieldErrors((prev) => {
-      if (!Object.keys(prev).length) return prev;
-      const fullName = collapseAccidentalDoubleName(
-        `${next.firstName} ${next.lastName}`.trim(),
-      );
-      const gate = evaluateQualifyGate({
-        companyName: next.bizName.trim(),
-        companyWebsite: next.website.trim(),
-        contactName: fullName,
-        contactTitle: next.title.trim(),
-        contactLinkedIn: next.linkedin.trim(),
-        emailVerified: next.emailVerify === "verified",
-        intentEvidence: next.qualifyForm.evidence,
-        personalizationNote: next.qualifyForm.personalization,
-        primaryOpportunityLabel: next.qualifyForm.primaryOpportunityLabel,
-        outreachThreshold: intentPlaybook.outreachThreshold,
-        existingContactsForCompany: countCompanyContactsForUser(
-          leads,
-          currentUserId,
-          domainFromWebsiteOrEmail(next.website, next.email),
-          next.bizName,
-        ),
-        maxContactsPerCompany: maxContacts,
-      });
-      const stillBlocking = issuesToFieldErrors(gate.issues);
-      const nextErrors: Partial<Record<string, string>> = {};
-      for (const code of Object.keys(prev)) {
-        if (stillBlocking[code]) nextErrors[code] = stillBlocking[code];
-      }
-      return nextErrors;
-    });
-  }, [
-    currentUserId,
-    intentPlaybook.outreachThreshold,
-    leads,
-    maxContacts,
-  ]);
-
-  const resetForm = React.useCallback(() => {
-    setForm(emptyNewProspectFormDraft());
-    setFieldErrors({});
-    setQualifyBlockerIssues([]);
-  }, []);
-
-  const syncBaseline = React.useCallback(() => {
-    setBaselineSerialized(serializeNewProspectDraft(formRef.current));
-  }, []);
-
-  const acceptServerDraft = React.useCallback(
-    (draft: ProspectDraft, nextForm: NewProspectFormDraft) => {
-      draftIdRef.current = draft.id;
-      draftRevisionRef.current = draft.revision;
-      setDraftId(draft.id);
-      setLastSavedAt(draft.lastSavedAt);
-      setBaselineSerialized(serializeNewProspectDraft(nextForm));
-      setDraftSaveState("saved");
-      acknowledgeLegacyDraftMigration(effectiveUid, draft.id, nextForm, draft.revision);
+  const personasForStrategy = React.useCallback(
+    (strategyId: string) => {
+      const selected = selectableStrategies.find((strategy) => strategy.id === strategyId);
+      if (!selected) return [];
+      const assignment = myActiveAssignments.find((item) => item.strategyId === selected.id);
+      const personaIds = assignment?.personaIdsOverride?.length
+        ? assignment.personaIdsOverride
+        : selected.personaIds;
+      return prospecting.personas.filter((persona) => personaIds.includes(persona.id) && persona.active);
     },
-    [effectiveUid],
+    [myActiveAssignments, prospecting.personas, selectableStrategies],
   );
 
-  const saveServerDraft = React.useCallback(async (): Promise<ProspectDraft> => {
+  const assignmentIdForStrategy = React.useCallback(
+    (strategyId: string) =>
+      myActiveAssignments.find((assignment) => assignment.strategyId === strategyId)?.id ?? "",
+    [myActiveAssignments],
+  );
+
+  const acceptServerDraft = React.useCallback((draft: ProspectDraft) => {
+    draftIdRef.current = draft.id;
+    draftRevisionRef.current = draft.revision;
+    setDraftId(draft.id);
+    setLastSavedAt(draft.lastSavedAt);
+    setDraftSaveState("saved");
+  }, []);
+
+  const readPreparedForm = React.useCallback(
+    (source?: ProspectFormValues): ProspectFormValues => {
+      const raw = source ?? form.getValues();
+      const nextForm = normalizeProspectFormUrlFields({
+        ...raw,
+        qualifyForm: {
+          ...raw.qualifyForm,
+          evidence: raw.qualifyForm.evidence.map((row) => ({
+            ...row,
+            id: row.id || newEntityId("ev"),
+          })),
+          personalization: { ...raw.qualifyForm.personalization },
+        },
+      });
+      const bizName = collapseAccidentalDoubleName(nextForm.bizName);
+      if (bizName !== nextForm.bizName.trim()) nextForm.bizName = bizName;
+      if (!nextForm.strategyId) return nextForm;
+      return {
+        ...nextForm,
+        strategyAssignmentId:
+          nextForm.strategyAssignmentId || assignmentIdForStrategy(nextForm.strategyId),
+        strategyVersion:
+          nextForm.strategyVersion ??
+          selectableStrategies.find((strategy) => strategy.id === nextForm.strategyId)?.version,
+      };
+    },
+    [assignmentIdForStrategy, form, selectableStrategies],
+  );
+
+  const syncPreparedInputs = React.useCallback(
+    (nextForm: ProspectFormValues) => {
+      const current = form.getValues();
+      const keys = ["website", "companyLinkedin", "careersUrl", "linkedin", "bizName"] as const;
+      for (const key of keys) {
+        if (nextForm[key] !== current[key]) {
+          form.setValue(key, nextForm[key], { shouldDirty: true });
+        }
+      }
+      if (nextForm.strategyAssignmentId !== current.strategyAssignmentId) {
+        form.setValue("strategyAssignmentId", nextForm.strategyAssignmentId);
+      }
+      if (nextForm.strategyVersion !== current.strategyVersion) {
+        form.setValue("strategyVersion", nextForm.strategyVersion);
+      }
+    },
+    [form],
+  );
+
+  const saveServerDraft = React.useCallback(async (snapshot?: ProspectFormValues): Promise<ProspectDraft> => {
     const operation = saveQueueRef.current.catch(() => undefined).then(async () => {
-      const nextForm = formRef.current;
-      saveNewProspectDraft(
-        effectiveUid,
-        draftIdRef.current ?? pendingRecoveryId,
-        nextForm,
-        draftRevisionRef.current,
-      );
+      const nextForm = readPreparedForm(snapshot);
+      syncPreparedInputs(nextForm);
       setDraftSaveState("saving");
+      let failed: "conflict" | "error" | undefined;
       try {
         const currentId = draftIdRef.current;
         const response = await fetch(
@@ -301,26 +278,18 @@ export function NewProspectDialog({
           code?: string;
         };
         if (response.status === 409 || body.code === "revision_conflict") {
+          failed = "conflict";
           setDraftSaveState("conflict");
-          throw new Error("This draft changed elsewhere. Reopen it to load the latest version.");
+          throw new Error("This draft changed elsewhere. Reload the latest version before saving again.");
         }
         if (!response.ok || !body.draft) {
-          throw new Error(
-            typeof body.error === "string" ? body.error : "Could not save draft.",
-          );
+          failed = "error";
+          throw new Error(errorMessage(body.error, "Could not save draft."));
         }
-        acceptServerDraft(body.draft, nextForm);
+        acceptServerDraft(body.draft);
         return body.draft;
       } catch (error) {
-        setDraftSaveState((state) =>
-          state === "conflict"
-            ? state
-            : typeof navigator !== "undefined" && !navigator.onLine
-              ? "offline"
-              : error instanceof TypeError
-                ? "offline"
-                : "error",
-        );
+        if (failed !== "conflict") setDraftSaveState("error");
         throw error;
       }
     });
@@ -329,33 +298,12 @@ export function NewProspectDialog({
       () => undefined,
     );
     return operation;
-  }, [acceptServerDraft, effectiveUid, launch, pendingRecoveryId]);
+  }, [acceptServerDraft, launch, readPreparedForm, syncPreparedInputs]);
 
-  const finalizeClose = React.useCallback(
-    (options?: { discard?: boolean }) => {
-      if (options?.discard) {
-        resetForm();
-        if (draftIdRef.current) clearNewProspectDraft(effectiveUid, draftIdRef.current);
-        clearNewProspectDraft(effectiveUid, pendingRecoveryId);
-        clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
-        clearNewProspectDraft(effectiveUid);
-        syncBaseline();
-      } else if (!isDirty) {
-        clearNewProspectDraft(effectiveUid);
-      }
-      setDiscardOpen(false);
-      onOpenChange(false);
-    },
-    [effectiveUid, isDirty, onOpenChange, pendingRecoveryId, resetForm, syncBaseline],
-  );
-
-  const requestClose = React.useCallback(() => {
-    if (isDirty) {
-      setDiscardOpen(true);
-      return;
-    }
-    finalizeClose();
-  }, [finalizeClose, isDirty]);
+  const finalizeClose = React.useCallback(() => {
+    setDiscardOpen(false);
+    onOpenChange(false);
+  }, [onOpenChange]);
 
   const handleDialogOpenChange = React.useCallback(
     (nextOpen: boolean, eventDetails?: { cancel?: () => void }) => {
@@ -363,175 +311,75 @@ export function NewProspectDialog({
         onOpenChange(true);
         return;
       }
-      if (isDirty) {
-        eventDetails?.cancel?.();
-        setDiscardOpen(true);
-        return;
-      }
-      finalizeClose();
+      eventDetails?.cancel?.();
+      if (submittingRef.current) return;
+      setDiscardOpen(true);
     },
-    [finalizeClose, isDirty, onOpenChange],
+    [onOpenChange],
   );
 
   React.useEffect(() => {
-    if (!open) {
-      wasOpenRef.current = false;
-      restoredToastShownRef.current = false;
+    if (!open) return;
+    const requestedDraftId = launch?.draftId;
+    if (!requestedDraftId) {
+      setReady(true);
+      setLoadError(undefined);
       return;
     }
 
-    const justOpened = !wasOpenRef.current;
-    wasOpenRef.current = true;
-    if (!justOpened) return;
-
     let cancelled = false;
+    setReady(false);
+    setLoadError(undefined);
     void (async () => {
-      const requestedDraftId = launch?.draftId;
-      if (requestedDraftId) {
-        try {
-          const response = await fetch(
-            `/api/prospect-drafts/${encodeURIComponent(requestedDraftId)}`,
-            { cache: "no-store" },
-          );
-          const body = (await response.json()) as { draft?: ProspectDraft; error?: string };
-          if (!response.ok || !body.draft) {
-            throw new Error(body.error ?? "Draft not found.");
-          }
-          if (body.draft.origin !== "manual") {
-            throw new Error("Research drafts must be resumed from the draft editor.");
-          }
-          const serverForm = prospectFormFromDraft(body.draft);
-          const local = loadNewProspectDraft(effectiveUid, requestedDraftId);
-          const hasNewerLocal =
-            local &&
-            serializeNewProspectDraft(local.form) !== serializeNewProspectDraft(serverForm) &&
-            Date.parse(local.savedAt || "1970-01-01") > Date.parse(body.draft.lastSavedAt);
-          if (cancelled) return;
-          applyDraft(hasNewerLocal ? local.form : serverForm);
-          draftIdRef.current = body.draft.id;
-          draftRevisionRef.current = body.draft.revision;
-          setDraftId(body.draft.id);
-          setLastSavedAt(body.draft.lastSavedAt);
-          setBaselineSerialized(serializeNewProspectDraft(serverForm));
-          setDraftSaveState(hasNewerLocal ? "offline" : "saved");
-          if (hasNewerLocal) toast.message("Recovered newer changes saved on this device.");
-        } catch (error) {
-          if (!cancelled) {
-            const local = loadNewProspectDraft(effectiveUid, requestedDraftId);
-            if (local) {
-              applyDraft(local.form);
-              draftIdRef.current = requestedDraftId;
-              draftRevisionRef.current = local.revision;
-              setDraftId(requestedDraftId);
-              setBaselineSerialized(emptyBaseline());
-            }
-            setDraftSaveState("offline");
-            toast.error(
-              local
-                ? "Server unavailable. Recovered the copy saved on this device."
-                : error instanceof Error
-                  ? error.message
-                  : "Could not resume draft.",
-            );
-          }
-        } finally {
-          if (!cancelled) setDraftInitialized(true);
+      try {
+        const response = await fetch(
+          `/api/prospect-drafts/${encodeURIComponent(requestedDraftId)}`,
+          { cache: "no-store" },
+        );
+        const body = (await response.json()) as { draft?: ProspectDraft; error?: string };
+        if (!response.ok || !body.draft) {
+          throw new Error(errorMessage(body.error, "Draft not found."));
         }
-        return;
-      }
-
-      const pending =
-        loadNewProspectDraft(effectiveUid, pendingRecoveryId) ??
-        (!initialPrefill
-          ? loadNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID)
-          : null);
-      const legacy = loadNewProspectDraft(effectiveUid);
-      const recovered = pending?.form ?? legacy?.form;
-      const next =
-        recovered && !isNewProspectFormDraftEmpty(recovered)
-          ? recovered
-          : mergePrefillIntoDraft(emptyNewProspectFormDraft(), initialPrefill);
-      if (cancelled) return;
-      applyDraft(next);
-      setBaselineSerialized(emptyBaseline());
-      setDraftSaveState(recovered ? "offline" : "idle");
-      setDraftInitialized(true);
-      if (recovered && !restoredToastShownRef.current) {
-        restoredToastShownRef.current = true;
-        toast.message("Restored your unsaved prospect draft.");
+        if (body.draft.origin !== "manual") {
+          throw new Error("Research drafts must be resumed from the draft editor.");
+        }
+        if (cancelled) return;
+        form.reset(prospectFormFromDraft(body.draft));
+        draftIdRef.current = body.draft.id;
+        draftRevisionRef.current = body.draft.revision;
+        setDraftId(body.draft.id);
+        setLastSavedAt(body.draft.lastSavedAt);
+        setDraftSaveState("saved");
+        setReady(true);
+      } catch (error) {
+        if (cancelled) return;
+        draftIdRef.current = undefined;
+        draftRevisionRef.current = undefined;
+        setDraftId(undefined);
+        setDraftSaveState("error");
+        setLoadError(error instanceof Error ? error.message : "Could not resume draft.");
+        setReady(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [
-    open,
-    effectiveUid,
-    applyDraft,
-    initialPrefill,
-    launch?.draftId,
-    pendingRecoveryId,
-  ]);
-
-  // Debounced local + server autosave (avoids sync localStorage on every keystroke).
-  React.useEffect(() => {
-    if (!open || !draftInitialized || !isDirty || submitting) return;
-    const handle = window.setTimeout(() => {
-      saveNewProspectDraft(
-        effectiveUid,
-        draftIdRef.current ?? pendingRecoveryId,
-        formRef.current,
-        draftRevisionRef.current,
-      );
-      void saveServerDraft().catch(() => undefined);
-    }, AUTOSAVE_MS);
-    return () => window.clearTimeout(handle);
-  }, [
-    open,
-    draftInitialized,
-    isDirty,
-    submitting,
-    effectiveUid,
-    pendingRecoveryId,
-    formSerialized,
-    saveServerDraft,
-  ]);
-
-  // Flush local recovery on unmount / close so a mid-debounce close does not lose work.
-  React.useEffect(() => {
-    if (!open || !draftInitialized) return;
-    return () => {
-      if (!isDirty) return;
-      saveNewProspectDraft(
-        effectiveUid,
-        draftIdRef.current ?? pendingRecoveryId,
-        formRef.current,
-        draftRevisionRef.current,
-      );
-    };
-  }, [open, draftInitialized, isDirty, effectiveUid, pendingRecoveryId]);
+  }, [open, launch?.draftId, form, resumeAttempt]);
 
   async function createProspect(skipQualifyGate: boolean) {
+    if (submittingRef.current) return;
     const oid = effectiveUid?.trim() ?? "";
     if (!oid) {
       toast.error("Sign in to create a prospect.");
       return;
     }
-
-    const nextForm = normalizeProspectFormUrlFields({ ...formRef.current });
-    const bn = collapseAccidentalDoubleName(nextForm.bizName);
-    if (bn !== nextForm.bizName.trim()) {
-      nextForm.bizName = bn;
-    }
-    if (
-      nextForm.website !== formRef.current.website ||
-      nextForm.companyLinkedin !== formRef.current.companyLinkedin ||
-      nextForm.careersUrl !== formRef.current.careersUrl ||
-      nextForm.linkedin !== formRef.current.linkedin ||
-      bn !== formRef.current.bizName.trim()
-    ) {
-      setForm(nextForm);
-    }
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+    setFieldErrors({});
+    const nextForm = readPreparedForm();
+    syncPreparedInputs(nextForm);
+    const bn = nextForm.bizName.trim();
     if (!bn) {
       toast.error("Business name is required.");
       return;
@@ -553,7 +401,7 @@ export function NewProspectDialog({
     if (emailTrim) {
       const existing =
         findContactByEmail(contacts, emailTrim) ||
-        contacts.find((c) => normalizedEmail(c.personalEmail ?? "") === emailTrim);
+        contacts.find((contact) => normalizedEmail(contact.personalEmail ?? "") === emailTrim);
       if (existing) {
         toast.error("Contact already exists", {
           description: existing.fullName || `${existing.firstName} ${existing.lastName}`,
@@ -561,7 +409,7 @@ export function NewProspectDialog({
             label: "View",
             onClick: () => {
               router.push(`/contacts/${existing.id}`);
-              requestClose();
+              finalizeClose();
             },
           },
         });
@@ -569,8 +417,10 @@ export function NewProspectDialog({
       }
     }
     if (personalEmailTrim) {
-      const existing = contacts.find((c) =>
-        [c.email, c.personalEmail].some((value) => normalizedEmail(value ?? "") === personalEmailTrim),
+      const existing = contacts.find((contact) =>
+        [contact.email, contact.personalEmail].some(
+          (value) => normalizedEmail(value ?? "") === personalEmailTrim,
+        ),
       );
       if (existing) {
         toast.error("Personal email already belongs to a contact", {
@@ -594,6 +444,8 @@ export function NewProspectDialog({
 
     const domain = domainFromWebsiteOrEmail(nextForm.website, nextForm.email);
     const companyContactCount = countCompanyContactsForUser(leads, oid, domain, bn);
+    const selectedStrategy = selectableStrategies.find((strategy) => strategy.id === nextForm.strategyId);
+    const maxContacts = resolveDailyTargets(selectedStrategy).maxContactsPerCompany ?? 2;
     const emailIsVerified = nextForm.emailVerify === "verified";
     const qualifyForm = nextForm.qualifyForm;
 
@@ -615,7 +467,7 @@ export function NewProspectDialog({
       });
       if (!gate.ok) {
         if (!skipQualifyGate) {
-          const blocking = gate.issues.filter((i) => i.blocking);
+          const blocking = gate.issues.filter((issue) => issue.blocking);
           setQualifyBlockerIssues(blocking);
           setFieldErrors(issuesToFieldErrors(blocking));
           setQualifyBlockerOpen(true);
@@ -629,10 +481,10 @@ export function NewProspectDialog({
       return;
     }
 
-    const yf = nextForm.yearFounded.trim();
-    if (yf) {
-      const n = Number(yf);
-      if (!Number.isFinite(n) || n < 1800 || n > new Date().getFullYear() + 1) {
+    const yearFounded = nextForm.yearFounded.trim();
+    if (yearFounded) {
+      const year = Number(yearFounded);
+      if (!Number.isFinite(year) || year < 1800 || year > new Date().getFullYear() + 1) {
         toast.error("Year founded should be a valid year.");
         return;
       }
@@ -642,12 +494,9 @@ export function NewProspectDialog({
       return;
     }
 
-    formRef.current = nextForm;
-
     if (!isDemo && !isAuthDisabled()) {
-      setSubmitting(true);
       try {
-        const savedDraft = await saveServerDraft();
+        const savedDraft = await saveServerDraft(nextForm);
         const response = await fetch(
           `/api/prospect-drafts/${encodeURIComponent(savedDraft.id)}/complete`,
           {
@@ -666,29 +515,22 @@ export function NewProspectDialog({
         };
         if (response.status === 409 || body.code === "revision_conflict") {
           setDraftSaveState("conflict");
-          throw new Error("This draft changed elsewhere. Reopen it before creating the prospect.");
+          throw new Error("This draft changed elsewhere. Reload the latest version before creating the prospect.");
         }
         if (!response.ok || !body.leadId) {
           throw new Error(body.error ?? "Could not create prospect.");
         }
-        clearNewProspectDraft(effectiveUid, savedDraft.id);
-        clearNewProspectDraft(effectiveUid, pendingRecoveryId);
-        clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
-        clearNewProspectDraft(effectiveUid);
         toast.success(
           skipQualifyGate
             ? "Prospect created as incomplete."
             : "Prospect created from your saved draft.",
         );
-        resetForm();
         onOpenChange(false);
         router.push(`/leads/${body.leadId}?from=prospects`);
       } catch (error) {
         toast.error("Could not save prospect", {
           description: error instanceof Error ? error.message : String(error),
         });
-      } finally {
-        setSubmitting(false);
       }
       return;
     }
@@ -699,15 +541,13 @@ export function NewProspectDialog({
     const leadId = newEntityId("l");
     const strategyId = nextForm.strategyId;
     const resolvedAssignmentId = strategyId
-      ? nextForm.strategyAssignmentId ||
-        myActiveAssignments.find((a) => a.strategyId === strategyId)?.id ||
-        ""
+      ? nextForm.strategyAssignmentId || assignmentIdForStrategy(strategyId)
       : "";
     const resolvedVersion = strategyId
       ? (nextForm.strategyVersion ?? selectedStrategy?.version)
       : undefined;
 
-    const entitiesForm: NewProspectFormDraft = {
+    const entitiesForm: ProspectFormValues = {
       ...nextForm,
       strategyAssignmentId: resolvedAssignmentId,
       strategyVersion: resolvedVersion,
@@ -727,16 +567,13 @@ export function NewProspectDialog({
       qualifyAsIncomplete: skipQualifyGate && prospectQualifyStatus === "incomplete",
     });
 
-    // Preserve previous demo/local contactCount behavior (graph starts empty).
     account.contactCount = 0;
 
-    const createdById = oid;
     const creatorLabel =
       getOwnerDisplayName(oid)?.trim() ||
       getUserById(oid)?.displayName?.trim() ||
       "Teammate";
 
-    setSubmitting(true);
     try {
       if (!isDemo && organizationId) {
         const db = getClientDb();
@@ -763,7 +600,7 @@ export function NewProspectDialog({
         id: newTimelineEventId(),
         leadId,
         type: "lead_created",
-        actorId: createdById,
+        actorId: oid,
         summary: `Prospect created by ${creatorLabel} for ${channelLabelFromValue(nextForm.channel, channelOptions) || nextForm.channel}. Add channel assignments when ready.`,
         createdAt: now,
       });
@@ -772,27 +609,27 @@ export function NewProspectDialog({
           ? "Prospect created as incomplete - finish qualification on the record when ready."
           : "Prospect created - add channels when ready.",
       );
-      resetForm();
-      if (draftIdRef.current) clearNewProspectDraft(effectiveUid, draftIdRef.current);
-      clearNewProspectDraft(effectiveUid, pendingRecoveryId);
-      clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
-      clearNewProspectDraft(effectiveUid);
       onOpenChange(false);
       router.push(`/leads/${leadId}?from=prospects`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error("Could not save prospect", { description: msg });
+    }
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (draftSaveState === "conflict") return;
     await createProspect(false);
   }
 
   async function handleSaveDraft(closeAfterSave = false) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       await saveServerDraft();
@@ -804,13 +641,15 @@ export function NewProspectDialog({
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save draft.");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
   async function reloadLatestDraft() {
     const currentId = draftIdRef.current;
-    if (!currentId) return;
+    if (!currentId || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const response = await fetch(`/api/prospect-drafts/${encodeURIComponent(currentId)}`, {
@@ -818,33 +657,33 @@ export function NewProspectDialog({
       });
       const body = (await response.json()) as { draft?: ProspectDraft; error?: string };
       if (!response.ok || !body.draft) {
-        throw new Error(body.error ?? "Could not reload draft.");
+        throw new Error(errorMessage(body.error, "Could not reload draft."));
       }
-      const nextForm = prospectFormFromDraft(body.draft);
-      applyDraft(nextForm);
-      acceptServerDraft(body.draft, nextForm);
+      form.reset(prospectFormFromDraft(body.draft));
+      setFieldErrors({});
+      acceptServerDraft(body.draft);
       toast.success("Latest draft loaded");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not reload draft.");
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
 
-  const saveStateLabel =
-    draftSaveState === "saving"
+  const saveStateLabel = loadError
+    ? "Could not load this draft"
+    : draftSaveState === "saving"
       ? "Saving…"
       : draftSaveState === "saved"
         ? `Saved${lastSavedAt ? ` ${new Date(lastSavedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`
-        : draftSaveState === "offline"
-          ? "Offline recovery saved on this device"
-          : draftSaveState === "conflict"
-            ? "Revision conflict - reload the latest version"
-            : draftSaveState === "error"
-              ? "Autosave failed - use Save draft to retry"
-              : draftId
-                ? "Draft ready"
-                : "Not saved yet";
+        : draftSaveState === "conflict"
+          ? "Revision conflict - reload the latest version"
+          : draftSaveState === "error"
+            ? "Save failed - use Save draft to retry"
+            : draftId
+              ? "Draft ready"
+              : "Not saved yet";
 
   return (
     <>
@@ -853,100 +692,114 @@ export function NewProspectDialog({
           className="flex flex-col min-h-0 sm:max-w-3xl w-[calc(100vw-1.5rem)] max-h-[min(92vh,880px)] overflow-hidden gap-0 p-0"
           showCloseButton
         >
-          <form
-            onSubmit={(e) => void handleSubmit(e)}
-            className="flex min-h-0 flex-1 flex-col"
-          >
-            <DialogHeader className="px-6 pt-6 pb-3 shrink-0 border-b">
-              <DialogTitle>New prospect</DialogTitle>
-              <DialogDescription>
-                Add the essentials now. Company research can be completed later from the prospect
-                record.
-              </DialogDescription>
-              <p
-                className={cn(
-                  "text-xs",
-                  draftSaveState === "conflict" || draftSaveState === "error"
-                    ? "text-destructive"
-                    : draftSaveState === "offline"
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "text-muted-foreground",
-                )}
-                role="status"
-                aria-live="polite"
-              >
-                {saveStateLabel}
-              </p>
-            </DialogHeader>
-
-            <div
-              ref={formScrollRef}
-              className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-6"
+          <Form {...form}>
+            <form
+              onSubmit={(event) => void handleSubmit(event)}
+              className="flex min-h-0 flex-1 flex-col"
             >
-              <ProspectFormSections
-                values={form}
-                onChange={handleFormChange}
-                channelOptions={channelOptions}
-                profiles={profiles}
-                strategies={selectableStrategies}
-                personas={strategyPersonas}
-                outreachThreshold={intentPlaybook.outreachThreshold}
-                existingContactsForCompany={existingContactsForCompany}
-                maxContactsPerCompany={maxContacts}
-                fieldErrors={fieldErrors}
-              />
-            </div>
+              <DialogHeader className="px-6 pt-6 pb-3 shrink-0 border-b">
+                <DialogTitle>New prospect</DialogTitle>
+                <DialogDescription>
+                  Add the essentials now. Company research can be completed later from the prospect
+                  record.
+                </DialogDescription>
+                <p
+                  className={cn(
+                    "text-xs",
+                    draftSaveState === "conflict" || draftSaveState === "error"
+                      ? "text-destructive"
+                      : "text-muted-foreground",
+                  )}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {saveStateLabel}
+                </p>
+              </DialogHeader>
 
-            <DialogFooter className="px-6 py-4 border-t shrink-0 bg-muted/20">
-              <Button type="button" variant="outline" onClick={requestClose} disabled={submitting}>
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void handleSaveDraft(false)}
-                disabled={submitting || !draftInitialized || draftSaveState === "conflict"}
+              <div
+                ref={formScrollRef}
+                className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-6"
               >
-                {draftSaveState === "saving" ? "Saving…" : "Save draft"}
-              </Button>
-              {draftSaveState === "conflict" ? (
+                {!ready ? (
+                  <div className="space-y-3">
+                    <p className={loadError ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
+                      {loadError ?? "Loading draft…"}
+                    </p>
+                    {loadError ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setResumeAttempt((attempt) => attempt + 1)}
+                      >
+                        Retry
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <fieldset disabled={submitting} className="m-0 min-w-0 border-0 p-0">
+                    <ProspectFormSections
+                      channelOptions={channelOptions}
+                      profiles={profiles}
+                      strategies={selectableStrategies}
+                      personasForStrategy={personasForStrategy}
+                      assignmentIdForStrategy={assignmentIdForStrategy}
+                      fieldErrors={fieldErrors}
+                    />
+                  </fieldset>
+                )}
+              </div>
+
+              <DialogFooter className="px-6 py-4 border-t shrink-0 bg-muted/20">
+                <Button type="button" variant="outline" onClick={() => setDiscardOpen(true)} disabled={submitting}>
+                  Cancel
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => void reloadLatestDraft()}
-                  disabled={submitting}
+                  onClick={() => void handleSaveDraft(false)}
+                  disabled={submitting || !ready || draftSaveState === "conflict"}
                 >
-                  Reload latest
+                  {draftSaveState === "saving" ? "Saving…" : "Save draft"}
                 </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => void handleSaveDraft(true)}
-                disabled={submitting || !draftInitialized || draftSaveState === "conflict"}
-              >
-                Save & close
-              </Button>
-              <Button type="submit" disabled={submitting}>
-                {submitting ? "Saving…" : "Create prospect"}
-              </Button>
-            </DialogFooter>
-          </form>
+                {draftSaveState === "conflict" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void reloadLatestDraft()}
+                    disabled={submitting}
+                  >
+                    Reload latest
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void handleSaveDraft(true)}
+                  disabled={submitting || !ready || draftSaveState === "conflict"}
+                >
+                  Save & close
+                </Button>
+                <Button type="submit" disabled={submitting || !ready || draftSaveState === "conflict"}>
+                  {submitting ? "Saving…" : "Create prospect"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
 
       <AlertDialog
         open={qualifyBlockerOpen}
-        onOpenChange={(open) => {
-          setQualifyBlockerOpen(open);
-          if (open) return;
+        onOpenChange={(nextOpen) => {
+          setQualifyBlockerOpen(nextOpen);
+          if (nextOpen) return;
           if (skipQualifyScrollRef.current) {
             skipQualifyScrollRef.current = false;
             return;
           }
           const first = firstQualifyFieldCode(qualifyBlockerIssues);
           if (!first) return;
-          // Wait for the alert to unmount so the form scroll container can move.
           window.setTimeout(() => {
             scrollToProspectField(first, formScrollRef.current);
           }, 50);
@@ -987,17 +840,14 @@ export function NewProspectDialog({
       <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Close without saving the latest changes?</AlertDialogTitle>
+            <AlertDialogTitle>Close this form?</AlertDialogTitle>
             <AlertDialogDescription>
-              The last server-saved version will remain available. Changes made since then will be
-              removed from this device.
+              Unsaved changes will be lost. A previously saved draft stays available.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep editing</AlertDialogCancel>
-            <AlertDialogAction onClick={() => finalizeClose({ discard: true })}>
-              Close without saving
-            </AlertDialogAction>
+            <AlertDialogAction onClick={finalizeClose}>Close without saving</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -104,9 +104,18 @@ class FakeFirestore {
 }
 
 describe("isLikelyMailScannerUserAgent", () => {
-  it("flags common scanner / proxy UAs", () => {
-    expect(isLikelyMailScannerUserAgent("GoogleImageProxy")).toBe(true);
+  it("flags security scanners but allows consumer mail proxies", () => {
+    expect(isLikelyMailScannerUserAgent("Proofpoint")).toBe(true);
+    expect(isLikelyMailScannerUserAgent("Mimecast")).toBe(true);
     expect(isLikelyMailScannerUserAgent("Yahoo! Slurp")).toBe(true);
+    // Gmail / consumer clients fetch the pixel through their image proxy —
+    // those are real opens and must be counted.
+    expect(isLikelyMailScannerUserAgent("GoogleImageProxy")).toBe(false);
+    expect(
+      isLikelyMailScannerUserAgent(
+        "Mozilla/5.0 (Windows NT 5.1; rv:11.0) Gecko Firefox/11.0 (via ggpht.com GoogleImageProxy)",
+      ),
+    ).toBe(false);
     expect(isLikelyMailScannerUserAgent("Mozilla/5.0 (Macintosh)")).toBe(false);
     expect(isLikelyMailScannerUserAgent("")).toBe(false);
     expect(isLikelyMailScannerUserAgent(null)).toBe(false);
@@ -121,7 +130,7 @@ describe("recordMailTrackingOpen", () => {
     vi.mocked(getAdminDb).mockReturnValue(db as never);
   });
 
-  it("skips scanner UAs without writing", async () => {
+  it("skips security scanner UAs without writing", async () => {
     db.rows.set(`${COLLECTIONS.mailTrackingMessages}/trk-1`, {
       organizationId: "org-1",
       leadId: "lead-1",
@@ -130,11 +139,34 @@ describe("recordMailTrackingOpen", () => {
     });
     const result = await recordMailTrackingOpen({
       trackingId: "trk-1",
-      userAgent: "GoogleImageProxy",
+      userAgent: "Proofpoint URL Defense",
     });
     expect(result).toEqual({ ok: true });
     expect(db.rows.get(`${COLLECTIONS.mailTrackingMessages}/trk-1`)?.openCount).toBe(0);
     expect(db.rows.get(`${COLLECTIONS.leads}/lead-1`)).toBeUndefined();
+  });
+
+  it("counts Gmail image-proxy opens (GoogleImageProxy)", async () => {
+    db.rows.set(`${COLLECTIONS.mailTrackingMessages}/trk-gmail`, {
+      organizationId: "org-1",
+      leadId: "lead-1",
+      trackOpens: true,
+      openCount: 0,
+    });
+    db.rows.set(`${COLLECTIONS.leads}/lead-1`, {
+      organizationId: "org-1",
+      ownerId: "u1",
+      emailOpenCount: 0,
+    });
+
+    const result = await recordMailTrackingOpen({
+      trackingId: "trk-gmail",
+      userAgent:
+        "Mozilla/5.0 (Windows NT 5.1; rv:11.0) Gecko Firefox/11.0 (via ggpht.com GoogleImageProxy)",
+    });
+    expect(result).toEqual({ ok: true });
+    expect(db.rows.get(`${COLLECTIONS.mailTrackingMessages}/trk-gmail`)?.openCount).toBe(1);
+    expect(db.rows.get(`${COLLECTIONS.leads}/lead-1`)?.lastEmailOpenedAt).toBeTruthy();
   });
 
   it("stamps lead + timeline on first open only", async () => {

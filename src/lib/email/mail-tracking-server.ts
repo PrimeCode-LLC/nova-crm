@@ -17,8 +17,13 @@ import type {
 } from "@/lib/email/mail-tracking-types";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 
+/**
+ * Security / anti-spam prefetch agents. Do **not** include Gmail's
+ * GoogleImageProxy (or similar consumer mail proxies) — that is how real
+ * opens arrive when images are loaded through the provider CDN.
+ */
 const SCANNER_UA =
-  /googleimageproxy|yahoo! slurp|barracuda|proofpoint|mimecast|messagelabs|fireeye|symantec|trendmicro|spamassassin|mailscanner|security.?scanner|url.?defense|safelinks|microsoft office|outlook-ios|bot\b|crawler|spider|preview/i;
+  /barracuda|proofpoint|mimecast|messagelabs|fireeye|symantec|trendmicro|spamassassin|mailscanner|security.?scanner|url.?defense|safelinks|yahoo! slurp|\bbot\b|crawler|spider/i;
 
 export function isLikelyMailScannerUserAgent(ua: string | null | undefined): boolean {
   const value = ua?.trim() ?? "";

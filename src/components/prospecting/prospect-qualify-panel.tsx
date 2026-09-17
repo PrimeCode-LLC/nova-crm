@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { useFieldArray, useFormContext, useWatch, Controller } from "react-hook-form";
 import { Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,21 +15,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import {
   emptyEvidence,
-  evaluateQualifyGate,
-  formatPersonalizationNote,
-  summarizeEvidenceMatch,
-  type IntentEvidence,
   type ProspectQualifyStatus,
   type ProspectRejectionReason,
   PROSPECT_REJECTION_REASONS,
 } from "@/lib/prospecting-strategy/qualify";
-import {
-  emptyProspectQualifyForm,
-  type ProspectQualifyFormState,
-} from "@/lib/prospects/prospect-form";
+import type { ProspectFormValues } from "@/lib/prospects/prospect-form";
 import { capitalizeSelectToken } from "@/lib/base-ui-select-label";
 import { prospectFieldAnchorId } from "@/lib/prospecting-strategy/qualify-field-focus";
 import { cn } from "@/lib/utils";
@@ -49,70 +41,18 @@ const SIGNAL_CATEGORIES = [
   "Other",
 ];
 
-export function emptyQualifyFormState(): ProspectQualifyFormState {
-  return emptyProspectQualifyForm();
-}
-
-export type { ProspectQualifyFormState } from "@/lib/prospects/prospect-form";
-
 export function ProspectQualifyPanel({
-  state,
-  onChange,
-  companyName,
-  companyWebsite,
-  contactName,
-  contactTitle,
-  contactLinkedIn,
-  emailVerified,
-  outreachThreshold,
-  existingContactsForCompany,
-  maxContactsPerCompany,
   fieldErrors,
 }: {
-  state: ProspectQualifyFormState;
-  onChange: (next: ProspectQualifyFormState) => void;
-  companyName: string;
-  companyWebsite: string;
-  contactName: string;
-  contactTitle: string;
-  contactLinkedIn: string;
-  emailVerified: boolean;
-  outreachThreshold: number;
-  existingContactsForCompany: number;
-  maxContactsPerCompany: number;
   fieldErrors?: Partial<Record<string, string>>;
 }) {
-  const gate = evaluateQualifyGate({
-    companyName,
-    companyWebsite,
-    contactName,
-    contactTitle,
-    contactLinkedIn,
-    emailVerified,
-    intentEvidence: state.evidence,
-    personalizationNote: state.personalization,
-    primaryOpportunityLabel: state.primaryOpportunityLabel,
-    outreachThreshold,
-    existingContactsForCompany,
-    maxContactsPerCompany,
+  const { control, register } = useFormContext<ProspectFormValues>();
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "qualifyForm.evidence",
+    keyName: "fieldId",
   });
-
-  const evidenceSummary = summarizeEvidenceMatch(state.evidence);
-
-  const updateEvidence = (id: string, patch: Partial<IntentEvidence>) => {
-    onChange({
-      ...state,
-      evidence: state.evidence.map((e) => (e.id === id ? { ...e, ...patch } : e)),
-    });
-  };
-
-  const signalStatusLabel = (id: string) => {
-    const status = evidenceSummary.statusById[id];
-    if (status === "matched") return "Matched";
-    if (status === "stale") return "Too old";
-    if (status === "future") return "Future date";
-    return "Incomplete";
-  };
+  const qualifyStatus = useWatch({ control, name: "qualifyForm.qualifyStatus" });
 
   return (
     <section className="space-y-4 rounded-md border p-3">
@@ -120,31 +60,8 @@ export function ProspectQualifyPanel({
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
           Evidence & qualification
         </p>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={evidenceSummary.passes ? "default" : "outline"}>
-            {evidenceSummary.matchLabel}
-          </Badge>
-          <Badge variant={gate.ok ? "default" : "secondary"}>
-            {gate.ok ? "Ready to complete" : `${gate.issues.filter((i) => i.blocking).length} blockers`}
-          </Badge>
-        </div>
+        <p className="text-xs text-muted-foreground">Checked when you create the prospect.</p>
       </div>
-
-      {gate.issues.length > 0 ? (
-        <ul className="mb-3 space-y-1 text-xs">
-          {gate.issues.map((issue) => (
-            <li
-              key={issue.code}
-              className={issue.blocking ? "text-destructive" : "text-amber-600 dark:text-amber-400"}
-            >
-              {issue.blocking ? "• " : "⚠ "}
-              {issue.message}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-xs text-muted-foreground">All qualify checks passed.</p>
-      )}
 
       {(fieldErrors?.do_not_contact ||
         fieldErrors?.quality_score ||
@@ -194,9 +111,7 @@ export function ProspectQualifyPanel({
             type="button"
             size="sm"
             variant="outline"
-            onClick={() =>
-              onChange({ ...state, evidence: [...state.evidence, emptyEvidence()] })
-            }
+            onClick={() => append(emptyEvidence())}
           >
             <Plus className="size-3.5" />
             Add signal
@@ -207,36 +122,23 @@ export function ProspectQualifyPanel({
             {fieldErrors.intent_evidence}
           </p>
         ) : null}
-        {state.evidence.map((ev, idx) => (
+        {fields.map((ev, idx) => (
           <div
-            key={ev.id}
+            key={ev.fieldId}
             className={cn(
               "rounded-md border bg-muted/20 p-3 space-y-2",
               fieldErrors?.intent_evidence && "border-destructive/40",
             )}
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="text-xs font-medium">Signal {idx + 1}</span>
-                <Badge
-                  variant={evidenceSummary.statusById[ev.id] === "matched" ? "default" : "outline"}
-                  className="text-[10px]"
-                >
-                  {signalStatusLabel(ev.id)}
-                </Badge>
-              </div>
-              {state.evidence.length > 1 ? (
+              <span className="text-xs font-medium">Signal {idx + 1}</span>
+              {fields.length > 1 ? (
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
                   className="h-7 text-destructive"
-                  onClick={() =>
-                    onChange({
-                      ...state,
-                      evidence: state.evidence.filter((e) => e.id !== ev.id),
-                    })
-                  }
+                  onClick={() => remove(idx)}
                 >
                   <Trash2 className="size-3.5" />
                 </Button>
@@ -246,71 +148,87 @@ export function ProspectQualifyPanel({
               <div className="grid min-w-0 gap-1">
                 <Label className="text-xs">Label</Label>
                 <Input
-                  value={ev.label}
                   placeholder="e.g. New distribution center in Texas"
-                  onChange={(e) => updateEvidence(ev.id, { label: e.target.value })}
+                  {...register(`qualifyForm.evidence.${idx}.label`)}
                 />
               </div>
               <div className="grid min-w-0 gap-1">
                 <Label className="text-xs">Category</Label>
-                <Select
-                  value={ev.category || undefined}
-                  onValueChange={(v) => updateEvidence(ev.id, { category: v ?? "" })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Category">{ev.category || "Category"}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SIGNAL_CATEGORIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Controller
+                  control={control}
+                  name={`qualifyForm.evidence.${idx}.category`}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value || undefined}
+                      onValueChange={(value) => field.onChange(value ?? "")}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Category">{field.value || "Category"}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SIGNAL_CATEGORIES.map((category) => (
+                          <SelectItem key={category} value={category}>
+                            {category}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
               </div>
               <div className="grid min-w-0 gap-1">
                 <Label className="text-xs">Strength</Label>
-                <Select
-                  value={ev.strength}
-                  onValueChange={(v) =>
-                    updateEvidence(ev.id, {
-                      strength: v === "medium" ? "medium" : "strong",
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue>{capitalizeSelectToken(ev.strength)}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="strong">Strong</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Controller
+                  control={control}
+                  name={`qualifyForm.evidence.${idx}.strength`}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(value) =>
+                        field.onChange(value === "medium" ? "medium" : "strong")
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue>{capitalizeSelectToken(field.value)}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="strong">Strong</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
               </div>
               <div className="grid min-w-0 gap-1">
                 <Label className="text-xs">Observed date</Label>
-                <Input
-                  type="date"
-                  value={ev.observedAt.slice(0, 10)}
-                  onChange={(e) => updateEvidence(ev.id, { observedAt: e.target.value })}
+                <Controller
+                  control={control}
+                  name={`qualifyForm.evidence.${idx}.observedAt`}
+                  render={({ field }) => (
+                    <Input
+                      type="date"
+                      name={field.name}
+                      ref={field.ref}
+                      value={typeof field.value === "string" ? field.value.slice(0, 10) : ""}
+                      onBlur={field.onBlur}
+                      onChange={(event) => field.onChange(event.target.value)}
+                    />
+                  )}
                 />
               </div>
               <div className="sm:col-span-2 grid min-w-0 gap-1">
                 <Label className="text-xs">Evidence URL</Label>
                 <Input
-                  value={ev.sourceUrl}
                   placeholder="https://…"
-                  onChange={(e) => updateEvidence(ev.id, { sourceUrl: e.target.value })}
+                  {...register(`qualifyForm.evidence.${idx}.sourceUrl`)}
                 />
               </div>
               <div className="sm:col-span-2 grid min-w-0 gap-1">
                 <Label className="text-xs">Explanation (your words)</Label>
                 <Textarea
                   rows={2}
-                  value={ev.explanation}
                   placeholder="Why this signal matters for Stellix Soft…"
-                  onChange={(e) => updateEvidence(ev.id, { explanation: e.target.value })}
+                  {...register(`qualifyForm.evidence.${idx}.explanation`)}
                 />
               </div>
             </div>
@@ -326,9 +244,8 @@ export function ProspectQualifyPanel({
         <Label className="text-sm">Primary opportunity</Label>
         <Input
           aria-invalid={Boolean(fieldErrors?.opportunity) || undefined}
-          value={state.primaryOpportunityLabel}
           placeholder="e.g. RFID and IoT · WMS integrations · Operational dashboards"
-          onChange={(e) => onChange({ ...state, primaryOpportunityLabel: e.target.value })}
+          {...register("qualifyForm.primaryOpportunityLabel")}
         />
         {fieldErrors?.opportunity ? (
           <p className="text-xs text-destructive" role="alert">
@@ -355,13 +272,7 @@ export function ProspectQualifyPanel({
               rows={2}
               placeholder="What recently happened?"
               aria-invalid={Boolean(fieldErrors?.personalization) || undefined}
-              value={state.personalization.trigger}
-              onChange={(e) =>
-                onChange({
-                  ...state,
-                  personalization: { ...state.personalization, trigger: e.target.value },
-                })
-              }
+              {...register("qualifyForm.personalization.trigger")}
             />
           </div>
           <div className="grid gap-1">
@@ -369,13 +280,7 @@ export function ProspectQualifyPanel({
             <Textarea
               rows={2}
               placeholder="What need does this create?"
-              value={state.personalization.likelyImpact}
-              onChange={(e) =>
-                onChange({
-                  ...state,
-                  personalization: { ...state.personalization, likelyImpact: e.target.value },
-                })
-              }
+              {...register("qualifyForm.personalization.likelyImpact")}
             />
           </div>
           <div className="grid gap-1">
@@ -383,13 +288,7 @@ export function ProspectQualifyPanel({
             <Textarea
               rows={2}
               placeholder="e.g. Enterprise Application Development"
-              value={state.personalization.relevantService}
-              onChange={(e) =>
-                onChange({
-                  ...state,
-                  personalization: { ...state.personalization, relevantService: e.target.value },
-                })
-              }
+              {...register("qualifyForm.personalization.relevantService")}
             />
           </div>
           <div className="grid gap-1">
@@ -397,89 +296,89 @@ export function ProspectQualifyPanel({
             <Textarea
               rows={2}
               placeholder="How should outreach lead?"
-              value={state.personalization.suggestedAngle}
-              onChange={(e) =>
-                onChange({
-                  ...state,
-                  personalization: { ...state.personalization, suggestedAngle: e.target.value },
-                })
-              }
+              {...register("qualifyForm.personalization.suggestedAngle")}
             />
           </div>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={state.deeplyPersonalized}
-            onCheckedChange={(v) => onChange({ ...state, deeplyPersonalized: Boolean(v) })}
-          />
-          Deeply personalized (counts toward daily deep-personalization target)
-        </label>
+        <Controller
+          control={control}
+          name="qualifyForm.deeplyPersonalized"
+          render={({ field }) => (
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={field.value}
+                onCheckedChange={(checked) => field.onChange(checked === true)}
+              />
+              Deeply personalized (counts toward daily deep-personalization target)
+            </label>
+          )}
+        />
       </div>
 
       <div className="grid sm:grid-cols-2 gap-2">
         <div className="grid gap-1">
           <Label className="text-xs">Save as</Label>
-          <Select
-            value={state.qualifyStatus}
-            onValueChange={(v) =>
-              onChange({
-                ...state,
-                qualifyStatus: (v as ProspectQualifyStatus) || "completed",
-              })
-            }
-          >
-            <SelectTrigger>
-              <SelectValue>{capitalizeSelectToken(state.qualifyStatus)}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="completed">Completed (counts toward target)</SelectItem>
-              <SelectItem value="incomplete">Incomplete draft</SelectItem>
-              <SelectItem value="rejected">Rejected research</SelectItem>
-            </SelectContent>
-          </Select>
+          <Controller
+            control={control}
+            name="qualifyForm.qualifyStatus"
+            render={({ field }) => (
+              <Select
+                value={field.value}
+                onValueChange={(value) =>
+                  field.onChange((value as ProspectQualifyStatus) || "completed")
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue>{capitalizeSelectToken(field.value)}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="completed">Completed (counts toward target)</SelectItem>
+                  <SelectItem value="incomplete">Incomplete draft</SelectItem>
+                  <SelectItem value="rejected">Rejected research</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          />
         </div>
-        {state.qualifyStatus === "rejected" ? (
+        {qualifyStatus === "rejected" ? (
           <div className="grid gap-1">
             <Label className="text-xs">Rejection reason</Label>
-            <Select
-              value={state.rejectionReason || undefined}
-              onValueChange={(v) =>
-                onChange({
-                  ...state,
-                  rejectionReason: (v as ProspectRejectionReason) || "",
-                })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select reason">
-                  {PROSPECT_REJECTION_REASONS.find((r) => r.value === state.rejectionReason)
-                    ?.label ?? "Select reason"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {PROSPECT_REJECTION_REASONS.map((r) => (
-                  <SelectItem key={r.value} value={r.value}>
-                    {r.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Controller
+              control={control}
+              name="qualifyForm.rejectionReason"
+              render={({ field }) => (
+                <Select
+                  value={field.value || undefined}
+                  onValueChange={(value) =>
+                    field.onChange((value as ProspectRejectionReason) || "")
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select reason">
+                      {PROSPECT_REJECTION_REASONS.find((reason) => reason.value === field.value)
+                        ?.label ?? "Select reason"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROSPECT_REJECTION_REASONS.map((reason) => (
+                      <SelectItem key={reason.value} value={reason.value}>
+                        {reason.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
           </div>
         ) : null}
       </div>
-      {state.qualifyStatus === "rejected" ? (
+      {qualifyStatus === "rejected" ? (
         <Textarea
           rows={2}
           placeholder="Optional rejection note"
-          value={state.rejectionNote}
-          onChange={(e) => onChange({ ...state, rejectionNote: e.target.value })}
+          {...register("qualifyForm.rejectionNote")}
         />
       ) : null}
-
-      <p className="text-[11px] text-muted-foreground whitespace-pre-wrap border-t pt-2">
-        Preview:{"\n"}
-        {formatPersonalizationNote(state.personalization) || "(personalization empty)"}
-      </p>
     </section>
   );
 }

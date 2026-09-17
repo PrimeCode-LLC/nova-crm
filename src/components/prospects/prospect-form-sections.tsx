@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, ShieldCheck } from "lucide-react";
+import { Controller, useFormContext, useWatch } from "react-hook-form";
+import { CheckCircle2, ChevronDown, Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { ProspectQualifyPanel } from "@/components/prospecting/prospect-qualify-panel";
@@ -31,7 +32,6 @@ import {
 } from "@/lib/constants";
 import type { BuyerPersona, ProspectingStrategy } from "@/lib/prospecting-strategy/types";
 import {
-  evaluateOutreachReadiness,
   normalizeOptionalHttpUrl,
   PROSPECT_FORM_UNSET,
   type ProspectFormValues,
@@ -109,19 +109,15 @@ type AnnotationKey =
   | "notes";
 
 type Props = {
-  values: ProspectFormValues;
-  onChange: (next: ProspectFormValues, changedKey?: AnnotationKey) => void;
   channelOptions: ChannelOption[];
   profiles: Profile[];
   strategies: ProspectingStrategy[];
-  personas: BuyerPersona[];
-  outreachThreshold: number;
-  existingContactsForCompany: number;
-  maxContactsPerCompany: number;
+  personasForStrategy: (strategyId: string) => BuyerPersona[];
+  assignmentIdForStrategy?: (strategyId: string) => string;
   renderAnnotation?: (key: AnnotationKey) => React.ReactNode;
   /** When set (saved prospect), show Million Verifier control next to email status. */
   verifyLeadId?: string;
-  /** Blocking qualify-gate messages keyed by issue code. */
+  /** Blocking qualify-gate messages keyed by issue code. Shown after submit. */
   fieldErrors?: Partial<Record<string, string>>;
 };
 
@@ -142,7 +138,6 @@ function Field({
   children: React.ReactNode;
   wide?: boolean;
   error?: string;
-  /** Qualify-gate / validation anchor (data-prospect-field). */
   fieldCode?: string;
 }) {
   const anchorId = fieldCode ? prospectFieldAnchorId(fieldCode) : undefined;
@@ -166,58 +161,103 @@ function Field({
   );
 }
 
+function UrlInput({
+  name,
+  ...props
+}: React.ComponentProps<typeof Input> & {
+  name: "website" | "companyLinkedin" | "careersUrl" | "linkedin";
+}) {
+  const { register, setValue } = useFormContext<ProspectFormValues>();
+  const registration = register(name);
+  return (
+    <Input
+      type="text"
+      inputMode="url"
+      autoComplete="url"
+      {...props}
+      {...registration}
+      onBlur={(event) => {
+        registration.onBlur(event);
+        props.onBlur?.(event);
+        const next = normalizeOptionalHttpUrl(event.target.value);
+        if (next !== event.target.value) {
+          setValue(name, next, { shouldDirty: true });
+        }
+      }}
+    />
+  );
+}
+
+function EnumSelect<T extends string>({
+  name,
+  options,
+  invalid,
+}: {
+  name: keyof ProspectFormValues;
+  options: Array<{ value: T; label: string }>;
+  invalid?: boolean;
+}) {
+  const { control } = useFormContext<ProspectFormValues>();
+  return (
+    <Controller
+      control={control}
+      name={name}
+      render={({ field }) => {
+        const value = typeof field.value === "string" ? field.value : PROSPECT_FORM_UNSET;
+        return (
+          <Select value={value} onValueChange={(next) => next && field.onChange(next)}>
+            <SelectTrigger aria-invalid={invalid || undefined}>
+              <SelectValue placeholder="Not set">
+                {value === PROSPECT_FORM_UNSET
+                  ? "Not set"
+                  : options.find((option) => option.value === value)?.label}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={PROSPECT_FORM_UNSET}>Not set</SelectItem>
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        );
+      }}
+    />
+  );
+}
+
 export function ProspectFormSections({
-  values,
-  onChange,
   channelOptions,
   profiles,
   strategies,
-  personas,
-  outreachThreshold,
-  existingContactsForCompany,
-  maxContactsPerCompany,
+  personasForStrategy,
+  assignmentIdForStrategy,
   renderAnnotation,
   verifyLeadId,
   fieldErrors,
 }: Props) {
+  const { control, register, setValue, getValues } = useFormContext<ProspectFormValues>();
+  const strategyId = useWatch({ control, name: "strategyId" });
+  const channel = useWatch({ control, name: "channel" });
+  const showAdvancedCompany = useWatch({ control, name: "showAdvancedCompany" });
   const [verifyingEmail, setVerifyingEmail] = React.useState(false);
-  const valuesRef = React.useRef(values);
-  valuesRef.current = values;
 
-  const update = React.useCallback(
-    <K extends keyof ProspectFormValues>(
-      key: K,
-      value: ProspectFormValues[K],
-      annotationKey?: AnnotationKey,
-    ) => {
-      onChange({ ...valuesRef.current, [key]: value }, annotationKey);
-    },
-    [onChange],
-  );
-
-  const selectedStrategy = React.useMemo(
-    () => strategies.find((strategy) => strategy.id === values.strategyId),
-    [strategies, values.strategyId],
-  );
-  const strategyPersonas = React.useMemo(
-    () => personas.filter((persona) => persona.active),
-    [personas],
-  );
-  const profileRequired = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(values.channel);
-  const profileOptions = React.useMemo(
-    () =>
-      profiles.filter(
-        (profile) => profile.active !== false && profile.channel === values.channel,
-      ),
-    [profiles, values.channel],
-  );
-  const readinessIssues = React.useMemo(
-    () => evaluateOutreachReadiness(values),
-    [values],
+  const selectedStrategy = strategies.find((strategy) => strategy.id === strategyId);
+  const strategyPersonas = personasForStrategy(strategyId);
+  const profileRequired = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel);
+  const profileOptions = profiles.filter(
+    (profile) => profile.active !== false && profile.channel === channel,
   );
 
   async function handleVerifyEmail() {
-    if (!verifyLeadId || !values.email.trim() || verifyingEmail) return;
+    const email = getValues("email").trim();
+    if (!verifyLeadId || verifyingEmail) return;
+    if (!email) {
+      toast.error("Enter a company email before verifying.");
+      return;
+    }
     setVerifyingEmail(true);
     try {
       const { results, summary } = await verifyLeadEmailsClient([verifyLeadId]);
@@ -227,7 +267,7 @@ export function ProspectFormSections({
         return;
       }
       if (first?.status) {
-        update("emailVerify", first.status);
+        setValue("emailVerify", first.status, { shouldDirty: true });
       }
       toast.success(formatVerifySummary(summary));
     } catch (err) {
@@ -244,45 +284,69 @@ export function ProspectFormSections({
           <SectionTitle>Strategy attribution</SectionTitle>
           <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
             <Field label="Prospecting strategy">
-              <Select
-                value={values.strategyId || "__none__"}
-                onValueChange={(value) => {
-                  const strategyId = value === "__none__" ? "" : value ?? "";
-                  onChange({
-                    ...valuesRef.current,
-                    strategyId,
-                    personaId: "",
-                    strategyVersion: strategies.find((item) => item.id === strategyId)?.version,
-                  });
-                }}
-              >
-                <SelectTrigger><SelectValue>{selectedStrategy?.name ?? "None"}</SelectValue></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {strategies.map((strategy) => (
-                    <SelectItem key={strategy.id} value={strategy.id}>{strategy.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Controller
+                control={control}
+                name="strategyId"
+                render={({ field }) => (
+                  <Select
+                    value={field.value || "__none__"}
+                    onValueChange={(value) => {
+                      const nextId = value === "__none__" ? "" : value ?? "";
+                      field.onChange(nextId);
+                      setValue("personaId", "", { shouldDirty: true });
+                      setValue(
+                        "strategyVersion",
+                        strategies.find((item) => item.id === nextId)?.version,
+                        { shouldDirty: true },
+                      );
+                      setValue(
+                        "strategyAssignmentId",
+                        nextId ? assignmentIdForStrategy?.(nextId) ?? "" : "",
+                        { shouldDirty: true },
+                      );
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue>{selectedStrategy?.name ?? "None"}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None</SelectItem>
+                      {strategies.map((strategy) => (
+                        <SelectItem key={strategy.id} value={strategy.id}>
+                          {strategy.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </Field>
             <Field label="Buyer persona">
-              <Select
-                value={values.personaId || "__none__"}
-                onValueChange={(value) => update("personaId", value === "__none__" ? "" : value ?? "")}
-                disabled={!values.strategyId}
-              >
-                <SelectTrigger>
-                  <SelectValue>
-                    {strategyPersonas.find((persona) => persona.id === values.personaId)?.name ?? "None"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {strategyPersonas.map((persona) => (
-                    <SelectItem key={persona.id} value={persona.id}>{persona.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Controller
+                control={control}
+                name="personaId"
+                render={({ field }) => (
+                  <Select
+                    value={field.value || "__none__"}
+                    onValueChange={(value) => field.onChange(value === "__none__" ? "" : value ?? "")}
+                    disabled={!strategyId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue>
+                        {strategyPersonas.find((persona) => persona.id === field.value)?.name ?? "None"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">None</SelectItem>
+                      {strategyPersonas.map((persona) => (
+                        <SelectItem key={persona.id} value={persona.id}>
+                          {persona.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </Field>
           </div>
           {selectedStrategy ? (
@@ -294,7 +358,9 @@ export function ProspectFormSections({
                 .map((item) => (
                   <div key={item.id} className="flex items-start gap-2 text-xs text-muted-foreground">
                     <CheckCircle2 className="mt-0.5 size-3.5 shrink-0" />
-                    <span><span className="text-foreground">{item.label}</span> · {item.requirement}</span>
+                    <span>
+                      <span className="text-foreground">{item.label}</span> · {item.requirement}
+                    </span>
                   </div>
                 ))}
             </div>
@@ -306,80 +372,134 @@ export function ProspectFormSections({
         <SectionTitle>Intake defaults</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
           <Field label="Intended channel">
-            <Select
-              value={values.channel}
-              onValueChange={(value) => {
-                if (!value) return;
-                onChange({ ...valuesRef.current, channel: value as ChannelKey, profileId: "" });
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue>
-                  {channelOptions.find((option) => option.key === values.channel)?.label ?? values.channel}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {channelOptions.map((option) => (
-                  <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Controller
+              control={control}
+              name="channel"
+              render={({ field }) => (
+                <Select
+                  value={field.value}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    field.onChange(value as ChannelKey);
+                    setValue("profileId", "", { shouldDirty: true });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue>
+                      {channelOptions.find((option) => option.key === field.value)?.label ?? field.value}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {channelOptions.map((option) => (
+                      <SelectItem key={option.key} value={option.key}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
           </Field>
           {profileRequired ? (
-            <Field label={outreachProfileFieldLabel(values.channel)}>
-              <Select value={values.profileId || undefined} onValueChange={(value) => update("profileId", value ?? "")}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select profile">
-                    {profiles.find((profile) => profile.id === values.profileId)?.name}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {profileOptions.map((profile) => (
-                    <SelectItem key={profile.id} value={profile.id}>{profile.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <Field label={outreachProfileFieldLabel(channel)}>
+              <Controller
+                control={control}
+                name="profileId"
+                render={({ field }) => (
+                  <Select value={field.value || undefined} onValueChange={(value) => field.onChange(value ?? "")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select profile">
+                        {profiles.find((profile) => profile.id === field.value)?.name}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {profileOptions.map((profile) => (
+                        <SelectItem key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
             </Field>
           ) : null}
           <Field label="Pipeline stage">
-            <Select value={values.stage} onValueChange={(value) => value && update("stage", value as PipelineStage)}>
-              <SelectTrigger><SelectValue>{PIPELINE_STAGES.find((item) => item.key === values.stage)?.label}</SelectValue></SelectTrigger>
-              <SelectContent>
-                {PIPELINE_STAGES.filter((item) => !item.isTerminal).map((item) => (
-                  <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Controller
+              control={control}
+              name="stage"
+              render={({ field }) => (
+                <Select
+                  value={field.value}
+                  onValueChange={(value) => value && field.onChange(value as PipelineStage)}
+                >
+                  <SelectTrigger>
+                    <SelectValue>
+                      {PIPELINE_STAGES.find((item) => item.key === field.value)?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PIPELINE_STAGES.filter((item) => !item.isTerminal).map((item) => (
+                      <SelectItem key={item.key} value={item.key}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
           </Field>
           <Field label="Temperature">
-            <Select value={values.temperature} onValueChange={(value) => value && update("temperature", value as LeadTemperature)}>
-              <SelectTrigger><SelectValue>{TEMPERATURE_TONE[values.temperature].label}</SelectValue></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(TEMPERATURE_TONE) as LeadTemperature[]).map((key) => (
-                  <SelectItem key={key} value={key}>{TEMPERATURE_TONE[key].label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Controller
+              control={control}
+              name="temperature"
+              render={({ field }) => (
+                <Select
+                  value={field.value}
+                  onValueChange={(value) => value && field.onChange(value as LeadTemperature)}
+                >
+                  <SelectTrigger>
+                    <SelectValue>{TEMPERATURE_TONE[field.value].label}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(TEMPERATURE_TONE) as LeadTemperature[]).map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {TEMPERATURE_TONE[key].label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
           </Field>
           <Field label="Priority">
-            <Select value={values.priority} onValueChange={(value) => value && update("priority", value as LeadPriority)}>
-              <SelectTrigger><SelectValue>{PRIORITY_TONE[values.priority].label}</SelectValue></SelectTrigger>
-              <SelectContent>
-                {(Object.keys(PRIORITY_TONE) as LeadPriority[]).map((key) => (
-                  <SelectItem key={key} value={key}>{PRIORITY_TONE[key].label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Controller
+              control={control}
+              name="priority"
+              render={({ field }) => (
+                <Select
+                  value={field.value}
+                  onValueChange={(value) => value && field.onChange(value as LeadPriority)}
+                >
+                  <SelectTrigger>
+                    <SelectValue>{PRIORITY_TONE[field.value].label}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(PRIORITY_TONE) as LeadPriority[]).map((key) => (
+                      <SelectItem key={key} value={key}>
+                        {PRIORITY_TONE[key].label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
           </Field>
           <Field label="Next action" wide>
-            <Input value={values.nextAction} onChange={(event) => update("nextAction", event.target.value)} />
+            <Input {...register("nextAction")} />
           </Field>
           <Field label="Internal notes (lead)" annotation={renderAnnotation?.("notes")} wide>
-            <Textarea
-              value={values.leadNotes}
-              onChange={(event) => update("leadNotes", event.target.value, "notes")}
-              rows={2}
-            />
+            <Textarea {...register("leadNotes")} rows={2} />
           </Field>
         </div>
       </section>
@@ -390,43 +510,31 @@ export function ProspectFormSections({
         <SectionTitle>Outreach readiness</SectionTitle>
         <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
           <Field label="Trigger event" annotation={renderAnnotation?.("triggerEvent")} wide>
-            <Input
-              value={values.triggerEvent}
-              onChange={(event) => update("triggerEvent", event.target.value, "triggerEvent")}
-            />
+            <Input {...register("triggerEvent")} />
           </Field>
           <Field label="Pain points" annotation={renderAnnotation?.("painPoints")} wide>
-            <Textarea
-              value={values.painPoints}
-              onChange={(event) => update("painPoints", event.target.value, "painPoints")}
-              rows={2}
-            />
+            <Textarea {...register("painPoints")} rows={2} />
           </Field>
-          <label className="flex items-start gap-3 rounded-md border p-3 sm:col-span-2">
-            <Checkbox
-              checked={values.doNotContact}
-              onCheckedChange={(checked) => update("doNotContact", checked === true)}
-              aria-label="Do not contact"
-              className="mt-0.5"
-            />
-            <span>
-              <span className="block text-sm font-medium">Do not contact</span>
-              <span className="block text-xs text-muted-foreground">
-                Prevent scheduling and channel push actions for this prospect.
-              </span>
-            </span>
-          </label>
-          <div
-            className={cn(
-              "flex items-start gap-2 rounded-md border px-3 py-2 text-xs sm:col-span-2",
-              readinessIssues.length
-                ? "border-warning/30 bg-warning/10 text-warning"
-                : "border-success/30 bg-success/10 text-success",
+          <Controller
+            control={control}
+            name="doNotContact"
+            render={({ field }) => (
+              <label className="flex items-start gap-3 rounded-md border p-3 sm:col-span-2">
+                <Checkbox
+                  checked={field.value}
+                  onCheckedChange={(checked) => field.onChange(checked === true)}
+                  aria-label="Do not contact"
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block text-sm font-medium">Do not contact</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Prevent scheduling and channel push actions for this prospect.
+                  </span>
+                </span>
+              </label>
             )}
-          >
-            {readinessIssues.length ? <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> : null}
-            <span>{readinessIssues.length ? readinessIssues.join(" · ") : "Ready for outreach"}</span>
-          </div>
+          />
         </div>
       </section>
 
@@ -440,10 +548,14 @@ export function ProspectFormSections({
             variant="ghost"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => update("showAdvancedCompany", !values.showAdvancedCompany)}
+            onClick={() =>
+              setValue("showAdvancedCompany", !getValues("showAdvancedCompany"), {
+                shouldDirty: true,
+              })
+            }
           >
-            {values.showAdvancedCompany ? "Hide" : "Show"} advanced research
-            <ChevronDown className={cn("size-3.5 transition-transform", values.showAdvancedCompany && "rotate-180")} />
+            {showAdvancedCompany ? "Hide" : "Show"} advanced research
+            <ChevronDown className={cn("size-3.5 transition-transform", showAdvancedCompany && "rotate-180")} />
           </Button>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
@@ -457,24 +569,23 @@ export function ProspectFormSections({
             <Input
               required
               aria-invalid={Boolean(fieldErrors?.company_name)}
-              value={values.bizName}
-              onChange={(event) => update("bizName", event.target.value, "companyName")}
+              {...register("bizName")}
             />
           </Field>
           <Field label="Industry" annotation={renderAnnotation?.("industry")}>
-            <Input value={values.industry} onChange={(event) => update("industry", event.target.value, "industry")} />
+            <Input {...register("industry")} />
           </Field>
           <Field label="Business description" annotation={renderAnnotation?.("businessDescription")} wide>
-            <Input value={values.bizDesc} onChange={(event) => update("bizDesc", event.target.value, "businessDescription")} />
+            <Input {...register("bizDesc")} />
           </Field>
           <Field label="City" annotation={renderAnnotation?.("city")}>
-            <Input value={values.city} onChange={(event) => update("city", event.target.value, "city")} />
+            <Input {...register("city")} />
           </Field>
           <Field label="State / region" annotation={renderAnnotation?.("state")}>
-            <Input value={values.state} onChange={(event) => update("state", event.target.value, "state")} />
+            <Input {...register("state")} />
           </Field>
           <Field label="Country" annotation={renderAnnotation?.("country")}>
-            <Input value={values.country} onChange={(event) => update("country", event.target.value, "country")} />
+            <Input {...register("country")} />
           </Field>
           <Field
             label="Website URL"
@@ -483,87 +594,54 @@ export function ProspectFormSections({
             fieldCode="company_website"
             error={fieldErrors?.company_website}
           >
-            <Input
-              type="text"
-              inputMode="url"
-              autoComplete="url"
+            <UrlInput
+              name="website"
               placeholder="example.com or https://example.com"
               aria-invalid={Boolean(fieldErrors?.company_website)}
-              value={values.website}
-              onChange={(event) => update("website", event.target.value, "companyWebsite")}
-              onBlur={(event) => {
-                const next = normalizeOptionalHttpUrl(event.target.value);
-                if (next !== event.target.value) update("website", next, "companyWebsite");
-              }}
             />
           </Field>
           <Field label="Company LinkedIn URL" annotation={renderAnnotation?.("companyLinkedIn")} wide>
-            <Input
-              type="text"
-              inputMode="url"
-              autoComplete="url"
-              placeholder="linkedin.com/company/…"
-              value={values.companyLinkedin}
-              onChange={(event) => update("companyLinkedin", event.target.value, "companyLinkedIn")}
-              onBlur={(event) => {
-                const next = normalizeOptionalHttpUrl(event.target.value);
-                if (next !== event.target.value) update("companyLinkedin", next, "companyLinkedIn");
-              }}
-            />
+            <UrlInput name="companyLinkedin" placeholder="linkedin.com/company/…" />
           </Field>
-          <div className={cn("contents", !values.showAdvancedCompany && "hidden")}>
+          <div className={cn("contents", !showAdvancedCompany && "hidden")}>
             <Field label="Year founded" annotation={renderAnnotation?.("yearFounded")}>
-              <Input value={values.yearFounded} onChange={(event) => update("yearFounded", event.target.value, "yearFounded")} />
+              <Input {...register("yearFounded")} />
             </Field>
             <Field label="Business status">
-              <SimpleSelect
-                value={values.bizStatus}
-                options={BUSINESS_STATUS_OPTIONS}
-                onChange={(value) => update("bizStatus", value as ProspectFormValues["bizStatus"])}
-              />
+              <EnumSelect name="bizStatus" options={BUSINESS_STATUS_OPTIONS} />
             </Field>
             <Field label="Company size" annotation={renderAnnotation?.("companySize")}>
-              <SimpleSelect
-                value={values.size}
+              <EnumSelect
+                name="size"
                 options={COMPANY_SIZES.map((value) => ({ value, label: COMPANY_SIZE_LABELS[value] }))}
-                onChange={(value) => update("size", value as typeof PROSPECT_FORM_UNSET | CompanySize, "companySize")}
               />
             </Field>
             <Field label="Revenue range" annotation={renderAnnotation?.("revenueRange")}>
-              <SimpleSelect
-                value={values.rev}
-                options={(Object.keys(REVENUE_RANGES) as RevenueRange[]).map((value) => ({ value, label: REVENUE_RANGES[value] }))}
-                onChange={(value) => update("rev", value as typeof PROSPECT_FORM_UNSET | RevenueRange, "revenueRange")}
+              <EnumSelect
+                name="rev"
+                options={(Object.keys(REVENUE_RANGES) as RevenueRange[]).map((value) => ({
+                  value,
+                  label: REVENUE_RANGES[value],
+                }))}
               />
             </Field>
             <Field label="Website status">
-              <SimpleSelect value={values.webStatus} options={WEBSITE_STATUS_OPTIONS} onChange={(value) => update("webStatus", value as ProspectFormValues["webStatus"])} />
+              <EnumSelect name="webStatus" options={WEBSITE_STATUS_OPTIONS} />
             </Field>
             <Field label="Online activity score">
-              <SimpleSelect value={values.activity} options={ACTIVITY_OPTIONS} onChange={(value) => update("activity", value as ProspectFormValues["activity"])} />
+              <EnumSelect name="activity" options={ACTIVITY_OPTIONS} />
             </Field>
             <Field label="Last website activity">
-              <Input type="date" value={values.lastSiteAt} onChange={(event) => update("lastSiteAt", event.target.value)} />
+              <Input type="date" {...register("lastSiteAt")} />
             </Field>
             <Field label="Last website observation" wide>
-              <Textarea value={values.lastSiteNote} onChange={(event) => update("lastSiteNote", event.target.value)} rows={2} />
+              <Textarea {...register("lastSiteNote")} rows={2} />
             </Field>
             <Field label="Tech stack / platform" annotation={renderAnnotation?.("techStack")} wide>
-              <Input value={values.techStackStr} onChange={(event) => update("techStackStr", event.target.value, "techStack")} />
+              <Input {...register("techStackStr")} />
             </Field>
             <Field label="Careers page URL" wide>
-              <Input
-                type="text"
-                inputMode="url"
-                autoComplete="url"
-                placeholder="example.com/careers"
-                value={values.careersUrl}
-                onChange={(event) => update("careersUrl", event.target.value)}
-                onBlur={(event) => {
-                  const next = normalizeOptionalHttpUrl(event.target.value);
-                  if (next !== event.target.value) update("careersUrl", next);
-                }}
-              />
+              <UrlInput name="careersUrl" placeholder="example.com/careers" />
             </Field>
           </div>
         </div>
@@ -580,15 +658,10 @@ export function ProspectFormSections({
             fieldCode="contact_name"
             error={fieldErrors?.contact_name}
           >
-            <Input
-              required
-              aria-invalid={Boolean(fieldErrors?.contact_name)}
-              value={values.firstName}
-              onChange={(event) => update("firstName", event.target.value, "firstName")}
-            />
+            <Input required aria-invalid={Boolean(fieldErrors?.contact_name)} {...register("firstName")} />
           </Field>
           <Field label="Last name" annotation={renderAnnotation?.("lastName")}>
-            <Input required value={values.lastName} onChange={(event) => update("lastName", event.target.value, "lastName")} />
+            <Input required {...register("lastName")} />
           </Field>
           <Field
             label="Role / title"
@@ -597,23 +670,19 @@ export function ProspectFormSections({
             fieldCode="contact_title"
             error={fieldErrors?.contact_title}
           >
-            <Input
-              aria-invalid={Boolean(fieldErrors?.contact_title)}
-              value={values.title}
-              onChange={(event) => update("title", event.target.value, "contactTitle")}
-            />
+            <Input aria-invalid={Boolean(fieldErrors?.contact_title)} {...register("title")} />
           </Field>
           <Field label="Seniority">
-            <Input value={values.seniority} onChange={(event) => update("seniority", event.target.value)} />
+            <Input {...register("seniority")} />
           </Field>
           <Field label="Contact location">
-            <Input value={values.contactLocation} onChange={(event) => update("contactLocation", event.target.value)} />
+            <Input {...register("contactLocation")} />
           </Field>
           <Field label="Primary email (company)" annotation={renderAnnotation?.("contactEmail")}>
-            <Input type="email" value={values.email} onChange={(event) => update("email", event.target.value, "contactEmail")} />
+            <Input type="email" {...register("email")} />
           </Field>
           <Field label="Personal email">
-            <Input type="email" value={values.personalEmail} onChange={(event) => update("personalEmail", event.target.value)} />
+            <Input type="email" {...register("personalEmail")} />
           </Field>
           <Field
             label="Email verified"
@@ -622,16 +691,13 @@ export function ProspectFormSections({
           >
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
-                <SimpleSelect
-                  value={values.emailVerify}
+                <EnumSelect
+                  name="emailVerify"
                   options={EMAIL_OPTIONS}
                   invalid={Boolean(fieldErrors?.verified_email)}
-                  onChange={(value) =>
-                    update("emailVerify", value as ProspectFormValues["emailVerify"])
-                  }
                 />
               </div>
-              {verifyLeadId && values.email.trim() ? (
+              {verifyLeadId ? (
                 <Button
                   type="button"
                   size="sm"
@@ -651,13 +717,13 @@ export function ProspectFormSections({
             </div>
           </Field>
           <Field label="Phone number" annotation={renderAnnotation?.("contactPhone")}>
-            <Input value={values.phone} onChange={(event) => update("phone", event.target.value, "contactPhone")} />
+            <Input {...register("phone")} />
           </Field>
           <Field label="Contact source">
-            <Input value={values.contactSource} onChange={(event) => update("contactSource", event.target.value)} />
+            <Input {...register("contactSource")} />
           </Field>
           <Field label="Best contact channel">
-            <SimpleSelect value={values.bestChannel} options={BEST_CHANNEL_OPTIONS} onChange={(value) => update("bestChannel", value as ProspectFormValues["bestChannel"])} />
+            <EnumSelect name="bestChannel" options={BEST_CHANNEL_OPTIONS} />
           </Field>
           <Field
             label="LinkedIn profile URL"
@@ -666,67 +732,16 @@ export function ProspectFormSections({
             fieldCode="contact_linkedin"
             error={fieldErrors?.contact_linkedin}
           >
-            <Input
-              type="text"
-              inputMode="url"
-              autoComplete="url"
+            <UrlInput
+              name="linkedin"
               placeholder="linkedin.com/in/…"
               aria-invalid={Boolean(fieldErrors?.contact_linkedin)}
-              value={values.linkedin}
-              onChange={(event) => update("linkedin", event.target.value, "contactLinkedIn")}
-              onBlur={(event) => {
-                const next = normalizeOptionalHttpUrl(event.target.value);
-                if (next !== event.target.value) update("linkedin", next, "contactLinkedIn");
-              }}
             />
           </Field>
         </div>
       </section>
 
-      <ProspectQualifyPanel
-        state={values.qualifyForm}
-        onChange={(qualifyForm) => update("qualifyForm", qualifyForm)}
-        companyName={values.bizName}
-        companyWebsite={values.website}
-        contactName={`${values.firstName} ${values.lastName}`.trim()}
-        contactTitle={values.title}
-        contactLinkedIn={values.linkedin}
-        emailVerified={values.emailVerify === "verified"}
-        outreachThreshold={outreachThreshold}
-        existingContactsForCompany={existingContactsForCompany}
-        maxContactsPerCompany={maxContactsPerCompany}
-        fieldErrors={fieldErrors}
-      />
+      <ProspectQualifyPanel fieldErrors={fieldErrors} />
     </div>
-  );
-}
-
-function SimpleSelect({
-  value,
-  options,
-  onChange,
-  invalid,
-}: {
-  value: string;
-  options: Array<{ value: string; label: string }>;
-  onChange: (value: string) => void;
-  invalid?: boolean;
-}) {
-  return (
-    <Select value={value} onValueChange={(next) => next && onChange(next)}>
-      <SelectTrigger aria-invalid={invalid || undefined}>
-        <SelectValue placeholder="Not set">
-          {value === PROSPECT_FORM_UNSET
-            ? "Not set"
-            : options.find((option) => option.value === value)?.label}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={PROSPECT_FORM_UNSET}>Not set</SelectItem>
-        {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
   );
 }
