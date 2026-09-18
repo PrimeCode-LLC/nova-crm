@@ -16,8 +16,10 @@ import {
 } from "@/lib/cancel-followup-scheduled-email-client";
 import { dispatchLeadReplyReceived } from "@/lib/email/lead-reply-events";
 import { buildReplyDetectedPatch, shouldOpenReplyReview } from "@/lib/leads/reply-review";
+import { resolveLeadIdsByEmailClient } from "@/lib/crm-dedupe-client";
 import { isImapInboxConfigured, useEmailAccountStore } from "@/stores/email-account-store";
 import { toast } from "sonner";
+import type { Lead } from "@/lib/types";
 
 const PROCESSED_KEY = "nova-followup-reply-processed";
 /** Only backfill recently-seen mail so sync-after-read still stamps lastReplyAt. */
@@ -75,11 +77,16 @@ export function FollowupPlanReplyWatcher() {
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const processedRef = React.useRef(readProcessed());
   const inFlightRef = React.useRef(new Set<string>());
+  const [remoteEmailMap, setRemoteEmailMap] = React.useState<Record<string, string>>({});
+  const resolvingEmailsRef = React.useRef(new Set<string>());
 
-  const emailToLeadId = React.useMemo(
-    () => buildLeadEmailToIdMap(leads, contacts),
-    [leads, contacts],
-  );
+  const emailToLeadId = React.useMemo(() => {
+    const map = buildLeadEmailToIdMap(leads, contacts);
+    for (const [email, leadId] of Object.entries(remoteEmailMap)) {
+      if (email && leadId) map.set(email, leadId);
+    }
+    return map;
+  }, [leads, contacts, remoteEmailMap]);
   const leadById = React.useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads]);
 
   const plans = React.useMemo(
@@ -96,6 +103,7 @@ export function FollowupPlanReplyWatcher() {
         ? mailboxes.filter((mb) => isImapInboxConfigured(mb) || (inboundByMailbox[mb.id]?.length ?? 0) > 0)
         : [];
     const now = Date.now();
+    const unresolvedEmails: string[] = [];
 
     type Candidate = {
       mid: string;
@@ -121,22 +129,28 @@ export function FollowupPlanReplyWatcher() {
 
         const manual = linkedLeadByMessageId[mid];
         const fromAddr = extractEmailAddress(message.from);
-        const leadId =
+        let leadId =
           manual ||
           (fromAddr ? emailToLeadId.get(fromAddr) : undefined) ||
           null;
+        if (!leadId && fromAddr) {
+          unresolvedEmails.push(fromAddr);
+          continue;
+        }
         if (!leadId) continue;
 
         const lead = leadById.get(leadId);
-        if (!lead) continue;
+        // Off-page lead: still pause sequences using leadId; treat as unknown timestamps.
+        const leadOrStub: Lead | { id: string; lastAutoReplyMessageId?: string; lastAutoReplyAt?: string; lastReplyMessageId?: string } =
+          lead ?? { id: leadId };
 
         const auto = isLikelyAutoReply(message);
         if (auto) {
           if (
-            lead.lastAutoReplyMessageId === mid ||
-            (lead.lastAutoReplyAt &&
-              Number.isFinite(Date.parse(lead.lastAutoReplyAt)) &&
-              Date.parse(lead.lastAutoReplyAt) >= Date.parse(message.date))
+            leadOrStub.lastAutoReplyMessageId === mid ||
+            (leadOrStub.lastAutoReplyAt &&
+              Number.isFinite(Date.parse(leadOrStub.lastAutoReplyAt)) &&
+              Date.parse(leadOrStub.lastAutoReplyAt) >= Date.parse(message.date))
           ) {
             processedRef.current.add(mid);
             continue;
@@ -152,7 +166,7 @@ export function FollowupPlanReplyWatcher() {
           continue;
         }
 
-        if (lead.lastReplyMessageId === mid) {
+        if (leadOrStub.lastReplyMessageId === mid) {
           processedRef.current.add(mid);
           continue;
         }
@@ -173,6 +187,18 @@ export function FollowupPlanReplyWatcher() {
       }
     }
 
+    const uniqueUnresolved = [...new Set(unresolvedEmails)].filter(
+      (e) => !resolvingEmailsRef.current.has(e) && !remoteEmailMap[e],
+    );
+    if (uniqueUnresolved.length) {
+      for (const e of uniqueUnresolved) resolvingEmailsRef.current.add(e);
+      void resolveLeadIdsByEmailClient(uniqueUnresolved.slice(0, 50)).then((byEmail) => {
+        for (const e of uniqueUnresolved) resolvingEmailsRef.current.delete(e);
+        if (Object.keys(byEmail).length === 0) return;
+        setRemoteEmailMap((prev) => ({ ...prev, ...byEmail }));
+      });
+    }
+
     // Unread first, then newest.
     candidates.sort((a, b) => {
       if (a.seen !== b.seen) return Number(a.seen) - Number(b.seen);
@@ -188,7 +214,12 @@ export function FollowupPlanReplyWatcher() {
       }
 
       const lead = leadById.get(c.leadId);
-      if (!lead) continue;
+      const leadForPatch = {
+        stage: (lead?.stage ?? "new") as Lead["stage"],
+        intakeKind: lead?.intakeKind,
+        companyName: lead?.companyName,
+        contactName: lead?.contactName,
+      };
 
       inFlightRef.current.add(c.mid);
 
@@ -254,7 +285,7 @@ export function FollowupPlanReplyWatcher() {
             await patchLeadAsync(
               c.leadId,
               buildReplyDetectedPatch({
-                lead,
+                lead: leadForPatch,
                 replyAt,
                 replyMessageId: c.mid,
                 source: "imap",
@@ -276,12 +307,12 @@ export function FollowupPlanReplyWatcher() {
             });
           }
 
-          const openedReview = shouldOpenReplyReview(lead);
+          const openedReview = shouldOpenReplyReview(leadForPatch);
           if (openedReview) {
             toast.message("Reply received - review on Dashboard", {
               description:
-                lead.companyName || lead.contactName
-                  ? `${lead.companyName || lead.contactName}: promote or move to Replied`
+                leadForPatch.companyName || leadForPatch.contactName
+                  ? `${leadForPatch.companyName || leadForPatch.contactName}: promote or move to Replied`
                   : "Promote to lead or move to Replied when ready.",
               duration: 9000,
             });
@@ -312,6 +343,7 @@ export function FollowupPlanReplyWatcher() {
     linkedLeadByMessageId,
     emailToLeadId,
     leadById,
+    remoteEmailMap,
     mailboxes,
     pauseFollowupPlanForReply,
     clearFollowupEmailSchedule,

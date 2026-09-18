@@ -31,6 +31,7 @@ import { persistLeadPatchClient } from "@/lib/documents/persist-lead-patch-clien
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { doc, getDoc } from "@/lib/db/document-shim/shim-client-firestore";
 import { findContactByEmail } from "@/lib/crm-dedupe";
+import { fetchCrmDedupeClient } from "@/lib/crm-dedupe-client";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { channelLabelFromValue } from "@/lib/channel-options";
 import { useChannelOptions } from "@/hooks/use-channel-options";
@@ -399,16 +400,20 @@ export function NewProspectDialog({
       return;
     }
     if (emailTrim) {
-      const existing =
+      let existing =
         findContactByEmail(contacts, emailTrim) ||
         contacts.find((contact) => normalizedEmail(contact.personalEmail ?? "") === emailTrim);
+      if (!existing) {
+        const remote = await fetchCrmDedupeClient({ email: emailTrim });
+        existing = remote.contact ?? undefined;
+      }
       if (existing) {
         toast.error("Contact already exists", {
           description: existing.fullName || `${existing.firstName} ${existing.lastName}`,
           action: {
             label: "View",
             onClick: () => {
-              router.push(`/contacts/${existing.id}`);
+              router.push(`/contacts/${existing!.id}`);
               finalizeClose();
             },
           },
@@ -417,11 +422,15 @@ export function NewProspectDialog({
       }
     }
     if (personalEmailTrim) {
-      const existing = contacts.find((contact) =>
+      let existing = contacts.find((contact) =>
         [contact.email, contact.personalEmail].some(
           (value) => normalizedEmail(value ?? "") === personalEmailTrim,
         ),
       );
+      if (!existing) {
+        const remote = await fetchCrmDedupeClient({ email: personalEmailTrim });
+        existing = remote.contact ?? undefined;
+      }
       if (existing) {
         toast.error("Personal email already belongs to a contact", {
           description: existing.fullName,

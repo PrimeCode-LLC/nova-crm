@@ -1,16 +1,18 @@
 /**
  * P3.2 — recompute + upsert `org_dashboard_summaries` from Postgres CRM rows.
  *
- * Leads/deals: dual-written Postgres (`payload` + columns).
- * Followups: still Firestore until that entity migrates (transitional).
+ * Leads/deals: Postgres CRM tables (`payload` + columns).
+ * Followups: `pg_documents` via the document shim (`getAdminDb` — not Firebase).
  * Org timezone: Postgres `organizations.settings.timezone` when present.
  *
  * Dirty-set + ~60s cooldown so write bursts coalesce (ENGINEERING_RULES §2).
- * Full BullMQ worker moves this off the web tier in Phase 4.
+ * When QUEUE_HEAVY_JOBS_V1 is on, web tier enqueues only; otherwise Next `after()`.
  */
 
 import type { Deal as PrismaDeal } from "@/generated/prisma/client";
 import { getRedis } from "@/lib/cache/redis";
+import { isDashboardKpiSqlAggregatesEnabled } from "@/lib/dashboard-kpi-v2-flags";
+import { computeOrgDashboardSummaryFieldsWithSql } from "@/lib/dashboard-kpis-sql";
 import { computeOrgDashboardSummaryFields } from "@/lib/dashboard-summary-compute";
 import {
   ORG_DASHBOARD_SUMMARY_VERSION,
@@ -79,7 +81,71 @@ function timezoneFromOrgSettings(settings: unknown): string {
   return "UTC";
 }
 
-async function loadFollowupsFromFirestore(organizationId: string): Promise<Followup[]> {
+async function loadOrgLeadsDealsChunked(
+  orgId: string,
+  chunk: number,
+): Promise<{ leads: ReturnType<typeof leadFromPostgresRow>[]; deals: Deal[] }> {
+  return withRlsBypass(async (tx) => {
+    const leadsAcc: ReturnType<typeof leadFromPostgresRow>[] = [];
+    let leadCursor: { updatedAt: Date; id: string } | undefined;
+    for (;;) {
+      const cursorWhere = leadCursor
+        ? {
+            OR: [
+              { updatedAt: { lt: leadCursor.updatedAt } },
+              {
+                updatedAt: leadCursor.updatedAt,
+                id: { lt: leadCursor.id },
+              },
+            ],
+          }
+        : {};
+      const leadRows = await tx.lead.findMany({
+        where: { organizationId: orgId, ...cursorWhere },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        take: chunk,
+      });
+      for (const row of leadRows) {
+        leadsAcc.push(leadFromPostgresRow(row));
+      }
+      if (leadRows.length < chunk) break;
+      const lastLead = leadRows[leadRows.length - 1]!;
+      leadCursor = { updatedAt: lastLead.updatedAt, id: lastLead.id };
+    }
+
+    const dealsAcc: Deal[] = [];
+    let dealCursor: { updatedAt: Date; id: string } | undefined;
+    for (;;) {
+      const cursorWhere = dealCursor
+        ? {
+            OR: [
+              { updatedAt: { lt: dealCursor.updatedAt } },
+              {
+                updatedAt: dealCursor.updatedAt,
+                id: { lt: dealCursor.id },
+              },
+            ],
+          }
+        : {};
+      const dealRows = await tx.deal.findMany({
+        where: { organizationId: orgId, ...cursorWhere },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        take: chunk,
+      });
+      for (const row of dealRows) {
+        dealsAcc.push(dealFromPostgresRow(row));
+      }
+      if (dealRows.length < chunk) break;
+      const lastDeal = dealRows[dealRows.length - 1]!;
+      dealCursor = { updatedAt: lastDeal.updatedAt, id: lastDeal.id };
+    }
+
+    return { leads: leadsAcc, deals: dealsAcc };
+  });
+}
+
+/** Load followups for the org from `pg_documents` (document shim). */
+async function loadFollowupsFromDocuments(organizationId: string): Promise<Followup[]> {
   const db = getAdminDb();
   if (!db) return [];
   try {
@@ -137,8 +203,10 @@ export async function upsertOrgDashboardSummaryPostgres(
 }
 
 /**
- * Full recount from Postgres leads/deals (+ Firestore followups) and upsert.
- * Does not require the writer flag (admin / cron / tests may call directly).
+ * Full recount from Postgres leads/deals (+ followups docs) and upsert.
+ * Loads CRM rows in keyset chunks (no single unbounded findMany into memory at once).
+ * Escalation (daily rollups / normalized followups) is gated on measured KPI p95 /
+ * DB CPU triggers — do not add those tables speculatively (ENGINEERING_RULES §4).
  */
 export async function recomputeOrgDashboardSummaryPostgres(
   organizationId: string,
@@ -147,35 +215,54 @@ export async function recomputeOrgDashboardSummaryPostgres(
   if (!orgId) return { ok: false, error: "organizationId required" };
   if (!isDatabaseConfigured()) return { ok: false, error: "DATABASE_URL is not set" };
 
+  const CHUNK = 500;
+
   try {
-    const { leads, deals, timeZone } = await withRlsBypass(async (tx) => {
-      const [leadRows, dealRows, org] = await Promise.all([
-        tx.lead.findMany({ where: { organizationId: orgId } }),
-        tx.deal.findMany({ where: { organizationId: orgId } }),
-        tx.organization.findUnique({
-          where: { id: orgId },
-          select: { settings: true },
-        }),
-      ]);
-      return {
-        leads: leadRows.map((row) => leadFromPostgresRow(row)),
-        deals: dealRows.map(dealFromPostgresRow),
-        timeZone: timezoneFromOrgSettings(org?.settings),
-      };
+    const timeZone = await withRlsBypass(async (tx) => {
+      const org = await tx.organization.findUnique({
+        where: { id: orgId },
+        select: { settings: true },
+      });
+      return timezoneFromOrgSettings(org?.settings);
     });
 
-    const followups = await loadFollowupsFromFirestore(orgId);
+    const followups = await loadFollowupsFromDocuments(orgId);
     const { loadEmailSendEventAtsFromServer } = await import(
       "@/lib/email/record-email-send-event-server"
     );
     const extraSentAts = await loadEmailSendEventAtsFromServer(orgId);
-    const fields = computeOrgDashboardSummaryFields({
-      leads,
-      deals,
-      followups,
-      timeZone,
-      extraSentAts,
-    });
+
+    let fields: ReturnType<typeof computeOrgDashboardSummaryFields>;
+
+    if (isDashboardKpiSqlAggregatesEnabled()) {
+      const sqlFields = await computeOrgDashboardSummaryFieldsWithSql({
+        organizationId: orgId,
+        followups,
+        timeZone,
+        extraSentAts,
+      });
+      if (sqlFields) {
+        fields = sqlFields;
+      } else {
+        const { leads, deals } = await loadOrgLeadsDealsChunked(orgId, CHUNK);
+        fields = computeOrgDashboardSummaryFields({
+          leads,
+          deals,
+          followups,
+          timeZone,
+          extraSentAts,
+        });
+      }
+    } else {
+      const { leads, deals } = await loadOrgLeadsDealsChunked(orgId, CHUNK);
+      fields = computeOrgDashboardSummaryFields({
+        leads,
+        deals,
+        followups,
+        timeZone,
+        extraSentAts,
+      });
+    }
     const now = new Date().toISOString();
     const summary: OrgDashboardSummary = {
       id: orgId,
@@ -186,6 +273,11 @@ export async function recomputeOrgDashboardSummaryPostgres(
     };
 
     await upsertOrgDashboardSummaryPostgres(summary);
+    void import("@/lib/dashboard-kpis-server")
+      .then(({ invalidateDashboardKpisCache }) => invalidateDashboardKpisCache(orgId))
+      .catch(() => {
+        /* best-effort */
+      });
     return { ok: true, summary };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -325,8 +417,9 @@ export async function refreshDirtyOrgDashboardSummariesPostgres(opts?: {
 }
 
 /**
- * Mark org dirty and schedule a non-blocking refresh (Next `after()`).
- * Safe to call from CRM dual-write paths; never throws to callers.
+ * Mark org dirty and schedule a refresh.
+ * When heavy queue is enabled: enqueue only (worker computes) — no web-tier after().
+ * Fallback: Next `after()` deferred refresh for local/dev without queue.
  */
 export function scheduleOrgDashboardSummaryRefresh(organizationId: string): void {
   if (!isPostgresDashboardSummaryWriterEnabled() || !isDatabaseConfigured()) return;
@@ -337,26 +430,33 @@ export function scheduleOrgDashboardSummaryRefresh(organizationId: string): void
     /* logged in mark */
   });
 
-  const runDeferred = () => {
-    void refreshOrgDashboardSummaryPostgresIfDue(orgId).catch((err) => {
-      console.error(
-        "[pg-dashboard-summary] deferred refresh failed",
-        orgId,
-        err instanceof Error ? err.message : err,
-      );
-    });
-  };
-
-  void import("next/server")
-    .then(({ after }) => {
+  void import("@/lib/queue/flags")
+    .then(async ({ isQueueHeavyJobsV1Enabled }) => {
+      if (isQueueHeavyJobsV1Enabled()) {
+        const { enqueueDashboardSummaryJob } = await import("@/lib/queue/enqueue");
+        await enqueueDashboardSummaryJob({ mode: "org", organizationId: orgId });
+        return;
+      }
+      const runDeferred = () => {
+        void refreshOrgDashboardSummaryPostgresIfDue(orgId).catch((err) => {
+          console.error(
+            "[pg-dashboard-summary] deferred refresh failed",
+            orgId,
+            err instanceof Error ? err.message : err,
+          );
+        });
+      };
       try {
+        const { after } = await import("next/server");
         after(runDeferred);
       } catch {
         runDeferred();
       }
     })
     .catch(() => {
-      runDeferred();
+      void refreshOrgDashboardSummaryPostgresIfDue(orgId).catch(() => {
+        /* logged in refresh */
+      });
     });
 }
 

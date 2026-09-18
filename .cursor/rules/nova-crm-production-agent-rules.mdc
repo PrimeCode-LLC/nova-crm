@@ -1,0 +1,49 @@
+---
+description: Live production CRM — never risk existing data, test before done, don't break old features, don't over-engineer, clarify then self-check
+alwaysApply: true
+---
+
+# Nova CRM production agent rules
+
+This app is **live production** with irreplaceable tenant data (~20 months of team collection). Binding contract: [`Architecture fixes plan/NOVA-CRM-PRODUCTION-AGENT-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-PRODUCTION-AGENT-RULES.md).
+
+If a request conflicts: name the rule, propose the safer alternative, proceed only after explicit user override.
+
+## 1. Never endanger existing data
+
+- No `DROP` / `TRUNCATE` / unconstrained `DELETE` or `UPDATE`, no `prisma migrate reset`, no seed/reset of shared DBs, no "cleanup" that rewrites customer rows.
+- Schema changes are **additive** only (expand/contract). No dropping columns/tables still in use. No backfill that rewrites existing rows without an explicit, reversible user-approved plan.
+- Never point tools or `.env` at production credentials. Staging never uses prod data or secrets.
+- Change code, not customer records.
+
+## 2. Test before calling work done
+
+- Run tests for the change **and** shared paths (callers, APIs, workers, schema).
+- UI/routing/visible behavior: verify in the browser like a user. If you cannot, say so — do not claim done.
+- No breaking API/route/schema contracts without a tested migration path.
+
+## 3. New work must not break existing features
+
+- Before changing shared code, find callers. Keep existing behavior as the default.
+- Do not repurpose existing fields, routes, queue names, or flags.
+- Check related routes, empty/error states, and tenant isolation.
+
+## 4. Do not over-engineer
+
+- Smallest change that meets the stated requirement. Match existing repo patterns.
+- No new package, table, queue, service, or abstraction unless the requirement cannot be met without it.
+
+## 5. Clarify before you build — do not assume
+
+- For a new feature or behavior change: ask until requirements are unambiguous. Recommend a simpler/safer approach **before** coding if you see one.
+- If the user already gave a complete instruction in this conversation, implement it — do not re-ask answered questions.
+- Never invent business rules, data migrations, or UX to fill gaps.
+
+## 6. Self-check before finishing (required)
+
+1. Is this the most efficient way?
+2. Is this the most secure way? (authz, validation, tenant isolation, secrets)
+3. Did it break any previous feature? How did you check?
+4. Is this optimized — or did we over-engineer?
+
+If any answer is no or not sure: fix it or tell the user. Do not mark complete until then.

@@ -130,6 +130,10 @@ import {
 } from "@/lib/documents/audit-change-client";
 import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
+import { fetchLeadByIdClient } from "@/lib/leads/fetch-lead-by-id-client";
+import { fetchLeadOwnerIdClient } from "@/lib/leads/fetch-lead-owner-id-client";
+import { useInvalidateDashboardKpis } from "@/hooks/use-dashboard-kpis";
+import { isDashboardKpiApiV2Enabled } from "@/lib/dashboard-kpi-v2-flags";
 import {
   buildArchivePatch,
   buildRestoreAsProspectPatch,
@@ -378,6 +382,10 @@ export function WorkspaceModeProvider({
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "/";
+  const invalidateDashboardKpis = useInvalidateDashboardKpis();
+  const bumpDashboardKpis = React.useCallback(() => {
+    if (isDashboardKpiApiV2Enabled()) invalidateDashboardKpis();
+  }, [invalidateDashboardKpis]);
   const [mode, setModeState] = React.useState<WorkspaceMode>(initialMode);
   const [demoPersonaId, setDemoPersonaState] = React.useState(initialDemoPersonaId);
   const [demoSnapshot, setDemoSnapshot] = React.useState<WorkspaceSnapshot | null>(null);
@@ -646,8 +654,21 @@ export function WorkspaceModeProvider({
     liveLeadsForPersistRef.current = liveFs.leads;
   }, [liveFs.leads]);
 
-  const leadOwnerIdForFirestore = React.useCallback((leadId: string) => {
-    return liveLeadsForPersistRef.current.find((l) => l.id === leadId)?.ownerId?.trim() ?? "";
+  const leadOwnerCacheRef = React.useRef<Map<string, string>>(new Map());
+
+  const resolveLeadOwnerIdForFirestore = React.useCallback(async (leadId: string) => {
+    const id = leadId.trim();
+    if (!id) return "";
+    const fromLive = liveLeadsForPersistRef.current.find((l) => l.id === id)?.ownerId?.trim();
+    if (fromLive) return fromLive;
+    const fromSnapshot = snapshotRef.current.leads.find((l) => l.id === id)?.ownerId?.trim();
+    if (fromSnapshot) return fromSnapshot;
+    if (leadOwnerCacheRef.current.has(id)) {
+      return leadOwnerCacheRef.current.get(id) ?? "";
+    }
+    const ownerId = await fetchLeadOwnerIdClient(id);
+    leadOwnerCacheRef.current.set(id, ownerId);
+    return ownerId;
   }, []);
 
   const [orgMemberLabels, setOrgMemberLabels] = React.useState<Record<string, string>>({});
@@ -1123,7 +1144,7 @@ export function WorkspaceModeProvider({
                 db,
                 orgId,
                 timeline,
-                leadOwnerIdForFirestore(normalized.leadId!),
+                await resolveLeadOwnerIdForFirestore(normalized.leadId!),
               );
             }
           } catch (e) {
@@ -1154,7 +1175,7 @@ export function WorkspaceModeProvider({
         };
       });
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore, viewerUid],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore, viewerUid],
   );
 
   const createFollowupPlanWithFollowups = React.useCallback(
@@ -1206,7 +1227,7 @@ export function WorkspaceModeProvider({
                 db,
                 orgId,
                 te,
-                leadOwnerIdForFirestore(te.leadId),
+                await resolveLeadOwnerIdForFirestore(te.leadId),
               );
             }
           } catch (e) {
@@ -1230,7 +1251,7 @@ export function WorkspaceModeProvider({
         timelineAdded: timelines.length ? [...s.timelineAdded, ...timelines] : s.timelineAdded,
       }));
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore, viewerUid],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore, viewerUid],
   );
 
   const pauseFollowupPlanForReply = React.useCallback(
@@ -1268,7 +1289,12 @@ export function WorkspaceModeProvider({
             payload: { planId: input.planId, replyMessageId: input.replyMessageId },
             createdAt: iso,
           };
-          await persistTimelineEventCreate(db, orgId, te, leadOwnerIdForFirestore(input.leadId));
+          await persistTimelineEventCreate(
+            db,
+            orgId,
+            te,
+            await resolveLeadOwnerIdForFirestore(input.leadId),
+          );
         } catch (e) {
             toastError("Could not pause follow-up plan", e, {
               location: "src/components/providers/workspace-mode-provider.tsx",
@@ -1313,7 +1339,7 @@ export function WorkspaceModeProvider({
         duration: 8000,
       });
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore],
   );
 
   const resumeFollowupPlan = React.useCallback(
@@ -1355,7 +1381,12 @@ export function WorkspaceModeProvider({
             payload: { planId: input.planId, openFollowupIds: input.openFollowupIds },
             createdAt: iso,
           };
-          await persistTimelineEventCreate(db, orgId, te, leadOwnerIdForFirestore(input.leadId));
+          await persistTimelineEventCreate(
+            db,
+            orgId,
+            te,
+            await resolveLeadOwnerIdForFirestore(input.leadId),
+          );
         } catch (e) {
             toastError("Could not resume follow-up plan", e, {
               location: "src/components/providers/workspace-mode-provider.tsx",
@@ -1404,7 +1435,7 @@ export function WorkspaceModeProvider({
         };
       });
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore, viewerUid],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore, viewerUid],
   );
 
   /**
@@ -1507,7 +1538,7 @@ export function WorkspaceModeProvider({
                 db,
                 orgId,
                 timeline,
-                leadOwnerIdForFirestore(followup.leadId),
+                await resolveLeadOwnerIdForFirestore(followup.leadId),
               );
             }
           } catch (e) {
@@ -1529,7 +1560,7 @@ export function WorkspaceModeProvider({
         };
       });
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore],
   );
 
   const setFollowupEmailSchedule = React.useCallback(
@@ -1771,7 +1802,7 @@ export function WorkspaceModeProvider({
                 db,
                 orgId,
                 timeline,
-                leadOwnerIdForFirestore(t.leadId),
+                await resolveLeadOwnerIdForFirestore(t.leadId),
               );
             }
           } catch (e) {
@@ -1788,7 +1819,7 @@ export function WorkspaceModeProvider({
         timelineAdded: timeline ? [...s.timelineAdded, timeline] : s.timelineAdded,
       }));
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore],
   );
 
   const addLeadNote = React.useCallback(
@@ -1818,10 +1849,11 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = requireWorkspaceDb();
+            const noteLeadOwnerId = await resolveLeadOwnerIdForFirestore(leadId);
             await persistNoteCreate(db, orgId, note, {
-              leadOwnerId: leadOwnerIdForFirestore(leadId),
+              leadOwnerId: noteLeadOwnerId,
             });
-            await persistTimelineEventCreate(db, orgId, timeline, leadOwnerIdForFirestore(leadId));
+            await persistTimelineEventCreate(db, orgId, timeline, noteLeadOwnerId);
             await persistLeadActivityBump(db, leadId);
           } catch (e) {
             toastError("Could not save note", e, {
@@ -1846,7 +1878,7 @@ export function WorkspaceModeProvider({
             },
       }));
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore],
   );
 
   const updateLeadNote = React.useCallback(
@@ -1934,8 +1966,9 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = requireWorkspaceDb();
-            await persistTouchpointCreate(db, orgId, { ...t, occurredAt: iso }, leadOwnerIdForFirestore(t.leadId));
-            await persistTimelineEventCreate(db, orgId, event, leadOwnerIdForFirestore(t.leadId));
+            const touchOwnerId = await resolveLeadOwnerIdForFirestore(t.leadId);
+            await persistTouchpointCreate(db, orgId, { ...t, occurredAt: iso }, touchOwnerId);
+            await persistTimelineEventCreate(db, orgId, event, touchOwnerId);
             await persistLeadActivityBump(db, t.leadId);
           } catch (e) {
             toastError("Could not save touchpoint", e, {
@@ -1960,7 +1993,7 @@ export function WorkspaceModeProvider({
             },
       }));
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore],
   );
 
   const addTimelineEvent = React.useCallback(
@@ -1972,7 +2005,12 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = requireWorkspaceDb();
-            await persistTimelineEventCreate(db, orgId, e, leadOwnerIdForFirestore(e.leadId));
+            await persistTimelineEventCreate(
+              db,
+              orgId,
+              e,
+              await resolveLeadOwnerIdForFirestore(e.leadId),
+            );
           } catch (err) {
             toastError("Could not save timeline event", err, {
               location: "src/components/providers/workspace-mode-provider.tsx",
@@ -1995,7 +2033,7 @@ export function WorkspaceModeProvider({
             },
       }));
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore],
   );
 
   const addOrgActivityEvent = React.useCallback(
@@ -2079,8 +2117,9 @@ export function WorkspaceModeProvider({
           applyLeadPatchToSession(linkedSalesLeadId, salesPatch, iso);
         }
       }
+      bumpDashboardKpis();
     },
-    [mode, userDoc?.organizationId, userDoc?.orgRole, applyLeadPatchToSession],
+    [mode, userDoc?.organizationId, userDoc?.orgRole, applyLeadPatchToSession, bumpDashboardKpis],
   );
 
   const patchLead = React.useCallback(
@@ -2117,8 +2156,18 @@ export function WorkspaceModeProvider({
         "member";
 
       for (const item of items) {
-        const lead = snapshotRef.current.leads.find((l) => l.id === item.leadId);
-        if (lead && !canEditProspectDerivedLead(lead, viewerRole)) {
+        let lead = snapshotRef.current.leads.find((l) => l.id === item.leadId);
+        if (!lead && userDoc?.organizationId) {
+          const fetched = await fetchLeadByIdClient({
+            leadId: item.leadId,
+            organizationId: userDoc.organizationId,
+          });
+          if (fetched.status === "ok") lead = fetched.lead;
+        }
+        if (!lead) {
+          throw new Error("Could not authorize one or more selected leads (not found).");
+        }
+        if (!canEditProspectDerivedLead(lead, viewerRole)) {
           throw new Error("Only workspace admins can edit one or more of the selected leads.");
         }
       }
@@ -2222,8 +2271,9 @@ export function WorkspaceModeProvider({
       );
 
       onProgress?.(items.length, items.length);
+      bumpDashboardKpis();
     },
-    [mode, userDoc?.organizationId, userDoc?.orgRole],
+    [mode, userDoc?.organizationId, userDoc?.orgRole, bumpDashboardKpis],
   );
 
   const patchAccount = React.useCallback(
@@ -2510,9 +2560,10 @@ export function WorkspaceModeProvider({
         };
       });
       recordDeletedActivity();
+      bumpDashboardKpis();
       return true;
     },
-    [mode, userDoc?.organizationId, addOrgActivityEvent],
+    [mode, userDoc?.organizationId, addOrgActivityEvent, bumpDashboardKpis],
   );
 
   const archiveLead = React.useCallback(
@@ -2565,9 +2616,10 @@ export function WorkspaceModeProvider({
         });
       }
       if (!quiet) toast.success("Moved to archive");
+      bumpDashboardKpis();
       return true;
     },
-    [userDoc?.orgRole, patchLeadAsync, addOrgActivityEvent],
+    [userDoc?.orgRole, patchLeadAsync, addOrgActivityEvent, bumpDashboardKpis],
   );
 
   const restoreLead = React.useCallback(
@@ -2620,9 +2672,10 @@ export function WorkspaceModeProvider({
       if (!quiet) {
         toast.success(asProspect ? "Restored to Prospects" : "Restored from archive");
       }
+      bumpDashboardKpis();
       return true;
     },
-    [userDoc?.orgRole, patchLeadAsync, addOrgActivityEvent],
+    [userDoc?.orgRole, patchLeadAsync, addOrgActivityEvent, bumpDashboardKpis],
   );
 
   const updateLeadStage = React.useCallback(
@@ -2665,7 +2718,12 @@ export function WorkspaceModeProvider({
               ...(archivePatch ?? {}),
             };
             await updateDoc(doc(db, COLLECTIONS.leads, leadId), stagePayload);
-            await persistTimelineEventCreate(db, orgId, ev, leadOwnerIdForFirestore(leadId));
+            await persistTimelineEventCreate(
+              db,
+              orgId,
+              ev,
+              await resolveLeadOwnerIdForFirestore(leadId),
+            );
             if (syncSalesLeadStage && linkedSalesLeadId) {
               await updateDoc(doc(db, COLLECTIONS.leads, linkedSalesLeadId), {
                 stage: nextStage,
@@ -2711,7 +2769,7 @@ export function WorkspaceModeProvider({
         };
       });
     },
-    [mode, userDoc?.organizationId, userDoc?.orgRole, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, userDoc?.orgRole, resolveLeadOwnerIdForFirestore],
   );
 
   const toggleLeadPin = React.useCallback((leadId: string) => {
@@ -2969,7 +3027,7 @@ export function WorkspaceModeProvider({
                 db,
                 orgId,
                 timeline,
-                leadOwnerIdForFirestore(task.leadId),
+                await resolveLeadOwnerIdForFirestore(task.leadId),
               );
             }
             if (completed) {
@@ -2998,7 +3056,7 @@ export function WorkspaceModeProvider({
         };
       });
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, resolveLeadOwnerIdForFirestore],
   );
 
   const value = React.useMemo<WorkspaceContextValue>(() => {

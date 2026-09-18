@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { findContactByEmail } from "@/lib/crm-dedupe";
+import { fetchCrmDedupeClient } from "@/lib/crm-dedupe-client";
 import { deriveContactTimezone } from "@/lib/email/contact-timezone";
 import type { Account } from "@/lib/types";
 
@@ -67,9 +68,16 @@ export function AddAccountContactDialog({
     }
 
     const trimmedEmail = email.trim();
-    if (trimmedEmail && findContactByEmail(contacts, trimmedEmail)) {
-      toast.error("A contact with this email already exists.");
-      return;
+    if (trimmedEmail) {
+      let existing = findContactByEmail(contacts, trimmedEmail);
+      if (!existing) {
+        const remote = await fetchCrmDedupeClient({ email: trimmedEmail });
+        existing = remote.contact ?? undefined;
+      }
+      if (existing) {
+        toast.error("A contact with this email already exists.");
+        return;
+      }
     }
 
     const ownerId = currentUserId || users[0]?.id;

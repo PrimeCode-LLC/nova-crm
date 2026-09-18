@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 import { fmtRelative, initials } from "@/lib/format";
 import { UserChip } from "@/components/common/user-chip";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
@@ -75,7 +76,18 @@ function telHref(phone: string) {
 
 export default function ContactsPage() {
   const router = useRouter();
-  const { contacts, accounts, users, isDemo, workspaceLoading } = useWorkspace();
+  const { contacts: wsContacts, accounts, users, isDemo, workspaceLoading } = useWorkspace();
+  const crmPages = useCrmEntityPages({
+    entity: "contacts",
+    enabled: !isDemo,
+    drain: true,
+    includeTotalCount: true,
+  });
+  const contacts = React.useMemo(() => {
+    if (crmPages.enabled) return crmPages.items as typeof wsContacts;
+    return wsContacts;
+  }, [crmPages.enabled, crmPages.items, wsContacts]);
+  const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const { openQuickAdd } = useOpenQuickAdd();
   const [query, setQuery] = React.useState("");
   const q = query.trim().toLowerCase();
@@ -108,7 +120,7 @@ export default function ContactsPage() {
         }
       />
       <PageBody>
-        {workspaceLoading ? (
+        {listLoading ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && contacts.length === 0 ? (
           <WorkspaceEmptyHint title="No contacts in workspace" />

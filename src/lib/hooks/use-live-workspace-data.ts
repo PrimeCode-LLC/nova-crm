@@ -13,6 +13,10 @@ import {
 } from "@/lib/db/document-shim/shim-client-firestore";
 import { getClientDb } from "@/lib/db/document-access/client";
 import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import {
+  isDashboardKpiApiV2Enabled,
+  isWorkspaceCrmPollV2Enabled,
+} from "@/lib/dashboard-kpi-v2-flags";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { normalizeFeatureGrants } from "@/lib/admin-feature-access";
@@ -55,7 +59,15 @@ import {
 const ACTIVITY_RECORDS_LIVE_LIMIT = 200;
 /** Poll interval when CRM entities are read from Postgres instead of Firestore onSnapshot. */
 /** Member dashboards rely on this poll for live KPIs (no org-summary overlay). */
-const POSTGRES_CRM_POLL_MS = 15_000;
+/** V2 (WORKSPACE_CRM_POLL_V2 / KPI API): ≥60s per ENGINEERING_RULES §2. */
+const POSTGRES_CRM_POLL_MS_LEGACY = 15_000;
+const POSTGRES_CRM_POLL_MS_V2 = 60_000;
+
+function postgresCrmPollMs(): number {
+  return isDashboardKpiApiV2Enabled() || isWorkspaceCrmPollV2Enabled()
+    ? POSTGRES_CRM_POLL_MS_V2
+    : POSTGRES_CRM_POLL_MS_LEGACY;
+}
 const ORG_ACTIVITY_EVENTS_LIVE_LIMIT = 120;
 const TIMELINE_EVENTS_LIVE_LIMIT = 400;
 /** Lead-detail history caps for Firebase-free org-wide polls (notes / touchpoints). */
@@ -839,7 +851,7 @@ export function useLiveWorkspaceFirestore(
       void load();
       const intervalId = window.setInterval(() => {
         void load();
-      }, POSTGRES_CRM_POLL_MS);
+      }, postgresCrmPollMs());
       const onFocus = () => {
         void load();
       };
@@ -1197,7 +1209,7 @@ export function useLiveWorkspaceFirestore(
           void loadLeadsFromPostgres();
           const intervalId = window.setInterval(() => {
             void loadLeadsFromPostgres();
-          }, POSTGRES_CRM_POLL_MS);
+          }, postgresCrmPollMs());
           const onFocus = () => {
             void loadLeadsFromPostgres();
           };
@@ -1407,7 +1419,7 @@ export function useLiveWorkspaceFirestore(
             void load();
             const intervalId = window.setInterval(() => {
               void load();
-            }, POSTGRES_CRM_POLL_MS);
+            }, postgresCrmPollMs());
             const onFocus = () => {
               void load();
             };
@@ -1494,7 +1506,7 @@ export function useLiveWorkspaceFirestore(
           void loadDealsFromPostgres();
           const intervalId = window.setInterval(() => {
             void loadDealsFromPostgres();
-          }, POSTGRES_CRM_POLL_MS);
+          }, postgresCrmPollMs());
           const onFocus = () => {
             void loadDealsFromPostgres();
           };

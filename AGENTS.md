@@ -1,3 +1,11 @@
+<!-- BEGIN:nova-production-agent-rules -->
+# Nova CRM — Production agent rules (binding)
+
+This app is live production with irreplaceable tenant data. Loaded every session. If a request conflicts, flag it before implementing.
+
+@Architecture fixes plan/NOVA-CRM-PRODUCTION-AGENT-RULES.md
+<!-- END:nova-production-agent-rules -->
+
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know
 

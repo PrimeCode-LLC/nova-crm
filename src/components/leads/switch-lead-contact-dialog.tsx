@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { findContactByEmail } from "@/lib/crm-dedupe";
+import { fetchCrmDedupeClient } from "@/lib/crm-dedupe-client";
 import { openBounceReviewTasksForLead } from "@/lib/email/contact-email-change";
 import {
   applyLeadContactSwitch,
@@ -116,11 +117,21 @@ export function SwitchLeadContactDialog({
 
     const trimmedEmail = email.trim();
     const trimmedPersonal = personalEmail.trim();
-    if (trimmedEmail && findContactByEmail(ws.contacts, trimmedEmail)) {
-      throw new Error("A contact with this company email already exists");
+    if (trimmedEmail) {
+      let hit = findContactByEmail(ws.contacts, trimmedEmail);
+      if (!hit) {
+        const remote = await fetchCrmDedupeClient({ email: trimmedEmail });
+        hit = remote.contact ?? undefined;
+      }
+      if (hit) throw new Error("A contact with this company email already exists");
     }
-    if (trimmedPersonal && findContactByEmail(ws.contacts, trimmedPersonal)) {
-      throw new Error("A contact with this personal email already exists");
+    if (trimmedPersonal) {
+      let hit = findContactByEmail(ws.contacts, trimmedPersonal);
+      if (!hit) {
+        const remote = await fetchCrmDedupeClient({ email: trimmedPersonal });
+        hit = remote.contact ?? undefined;
+      }
+      if (hit) throw new Error("A contact with this personal email already exists");
     }
     if (!trimmedEmail && !trimmedPersonal && !linkedin.trim()) {
       throw new Error("Add an email or LinkedIn URL for the new person");

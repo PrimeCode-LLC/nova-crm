@@ -194,6 +194,11 @@ async function upsertInTx(
 function maybeRefreshSummary(entity: CrmEntity, organizationId: string): void {
   if (entity !== "lead" && entity !== "deal") return;
   scheduleOrgDashboardSummaryRefresh(organizationId);
+  void import("@/lib/dashboard-kpis-server")
+    .then(({ invalidateDashboardKpisCache }) => invalidateDashboardKpisCache(organizationId))
+    .catch(() => {
+      /* best-effort */
+    });
 }
 
 export type CrmWriteResult =

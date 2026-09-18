@@ -36,10 +36,34 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
   const ws = useWorkspace();
   const [editOpen, setEditOpen] = React.useState(false);
   const [addContactOpen, setAddContactOpen] = React.useState(false);
-  const account = ws.accounts.find((a) => a.id === accountId);
+  const [fetchedAccount, setFetchedAccount] = React.useState<
+    (typeof ws.accounts)[number] | null
+  >(null);
+  const [fetchDone, setFetchDone] = React.useState(false);
+  const accountFromWs = ws.accounts.find((a) => a.id === accountId);
+  const account = accountFromWs ?? fetchedAccount ?? undefined;
+
+  React.useEffect(() => {
+    if (accountFromWs || ws.isDemo) {
+      setFetchDone(true);
+      return;
+    }
+    let cancelled = false;
+    setFetchDone(false);
+    void import("@/lib/crm/fetch-crm-entity-by-id-client").then(({ fetchAccountByIdClient }) =>
+      fetchAccountByIdClient(accountId).then((res) => {
+        if (cancelled) return;
+        if (res.status === "ok") setFetchedAccount(res.entity);
+        setFetchDone(true);
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, accountFromWs, ws.isDemo]);
 
   if (!account) {
-    if (ws.workspaceLoading) {
+    if (ws.workspaceLoading || (!ws.isDemo && !fetchDone)) {
       return (
         <PageBody>
           <WorkspacePageSkeleton />

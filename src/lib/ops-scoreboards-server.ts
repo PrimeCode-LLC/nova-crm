@@ -4,6 +4,13 @@
  */
 
 import { getAdminDb } from "@/lib/db/document-access/admin";
+import {
+  fetchKpiSlimDealsForOrg,
+  fetchKpiSlimLeadsForOrg,
+} from "@/lib/dashboard-kpis-sql";
+import { isDatabaseConfigured } from "@/lib/db/prisma";
+import { listDealsFromPostgres } from "@/lib/db/list-crm-postgres";
+import { listLeadsFromPostgres } from "@/lib/db/list-leads-postgres";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   DEFAULT_CACHE_TTL_SECONDS,
@@ -74,8 +81,8 @@ export async function getOpsScoreboardsServer(
     users,
     timeZone,
     outreachThreshold,
-    leadsSnap,
-    dealsSnap,
+    leads,
+    deals,
     followupsSnap,
     tasksSnap,
     strategiesSnap,
@@ -84,16 +91,18 @@ export async function getOpsScoreboardsServer(
     listOrgUsersServer(orgId),
     getOrgTimezoneServer(orgId),
     loadOrgOutreachThreshold(orgId),
-    db.collection(COLLECTIONS.leads).where("organizationId", "==", orgId).get(),
-    db.collection(COLLECTIONS.deals).where("organizationId", "==", orgId).get(),
+    isDatabaseConfigured()
+      ? fetchKpiSlimLeadsForOrg(orgId)
+      : listLeadsFromPostgres({ organizationId: orgId }),
+    isDatabaseConfigured()
+      ? fetchKpiSlimDealsForOrg(orgId)
+      : listDealsFromPostgres({ organizationId: orgId }),
     db.collection(COLLECTIONS.followups).where("organizationId", "==", orgId).get(),
     db.collection(COLLECTIONS.leadTasks).where("organizationId", "==", orgId).get(),
     db.collection(COLLECTIONS.prospectingStrategies).where("organizationId", "==", orgId).get(),
     db.collection(COLLECTIONS.strategyAssignments).where("organizationId", "==", orgId).get(),
   ]);
 
-  const leads = leadsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Lead[];
-  const deals = dealsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Deal[];
   const followups = followupsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Followup[];
   const tasks = tasksSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as LeadTask[];
   const strategies = strategiesSnap.docs.map((d) => ({

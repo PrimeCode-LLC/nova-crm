@@ -19,8 +19,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
+import { OWNER_SCOPE_PREFIX, ownerScopeFromQueryParam } from "@/lib/owner-scope";
 import { filterActiveLeads } from "@/lib/leads/lead-archive";
+import { useCrmEntityPages, type CrmEntityPageFilters } from "@/hooks/use-crm-entity-pages";
 
 const LeadsTable = dynamic(
   () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
@@ -45,7 +46,34 @@ function LeadsPageInner() {
     .join("|");
   const idleOnly = searchParams.get("filter") === "idle";
 
-  const { leads, isDemo, workspaceLoading } = useWorkspace();
+  const { leads: wsLeads, isDemo, workspaceLoading, currentUserId } = useWorkspace();
+  const crmFilters = React.useMemo((): CrmEntityPageFilters => {
+    const stages = urlStageKey ? urlStageKey.split("|").filter(Boolean) : undefined;
+    const channels = urlChannelKey ? urlChannelKey.split("|").filter(Boolean) : undefined;
+    let ownerId: string | undefined;
+    if (ownerScope === "me" && currentUserId) ownerId = currentUserId;
+    else if (ownerScope.startsWith(OWNER_SCOPE_PREFIX)) {
+      ownerId = ownerScope.slice(OWNER_SCOPE_PREFIX.length);
+    }
+    return {
+      stages,
+      channels,
+      ownerId,
+      isIdle: idleOnly || undefined,
+      activeOnly: true,
+      intakeKind: "sales_lead",
+    };
+  }, [urlStageKey, urlChannelKey, idleOnly, ownerScope, currentUserId]);
+  const crmPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: !isDemo,
+    filters: crmFilters,
+  });
+  const leads = React.useMemo(() => {
+    if (crmPages.enabled) return crmPages.items as typeof wsLeads;
+    return wsLeads;
+  }, [crmPages.enabled, crmPages.items, wsLeads]);
+  const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const activeLeads = React.useMemo(() => filterActiveLeads(leads), [leads]);
   const salesLeadCount = React.useMemo(
     () => activeLeads.filter((l) => !l.intakeKind || l.intakeKind === "sales_lead").length,
@@ -168,7 +196,7 @@ function LeadsPageInner() {
         }
       />
       <PageBody contained>
-        {workspaceLoading ? (
+        {listLoading ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && salesLeadCount === 0 ? (
           <WorkspaceEmptyHint title="No leads in workspace" />

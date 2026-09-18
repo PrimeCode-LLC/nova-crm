@@ -110,6 +110,8 @@ import {
   flattenTimelineByLead,
 } from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
+import { useDashboardKpis } from "@/hooks/use-dashboard-kpis";
+import { isDashboardKpiApiV2Enabled } from "@/lib/dashboard-kpi-v2-flags";
 import {
   Select,
   SelectContent,
@@ -331,20 +333,35 @@ export default function DashboardPage() {
       ),
     [timelineByLead, scopedLeadIds],
   );
+  const kpiV2 = isDashboardKpiApiV2Enabled();
+  // When KPI API V2 is on, display gauges come from the server — do not aggregate
+  // workspace arrays on the production path (demo still computes client-side).
   const workflowMetrics = React.useMemo(
     () =>
-      computeDashboardWorkflowMetrics({
-        leads: scopedLeads,
-        followups: workflowFollowups,
-        plans: workflowPlans,
-        tasks: workflowTasks,
-        contacts,
-        currentUserId,
-        range: timeRange as DashboardTimeRangeKey,
-        timeZone: organizationTimezone,
-        extraSentAts: composeSentAts,
-      }),
+      kpiV2 && !isDemo
+        ? computeDashboardWorkflowMetrics({
+            leads: [],
+            followups: [],
+            plans: [],
+            tasks: [],
+            currentUserId,
+            range: timeRange as DashboardTimeRangeKey,
+            timeZone: organizationTimezone,
+          })
+        : computeDashboardWorkflowMetrics({
+            leads: scopedLeads,
+            followups: workflowFollowups,
+            plans: workflowPlans,
+            tasks: workflowTasks,
+            contacts,
+            currentUserId,
+            range: timeRange as DashboardTimeRangeKey,
+            timeZone: organizationTimezone,
+            extraSentAts: composeSentAts,
+          }),
     [
+      kpiV2,
+      isDemo,
       scopedLeads,
       workflowFollowups,
       workflowPlans,
@@ -368,11 +385,21 @@ export default function DashboardPage() {
     channelScopeEmpty: channelScope.length === 0,
     ownerScopeIsAll: ownerScope === "all-owners",
   });
+  const dashboardKpis = useDashboardKpis({
+    enabled: kpiV2 && !isDemo,
+    channels: channelScope,
+    ownerScope,
+    range: timeRange,
+    previewRole: prefs.previewRole,
+  });
   const dashboardSummary = useOrgDashboardSummary({
-    enabled: !isDemo && !workspaceLoading,
+    enabled: !kpiV2 && !isDemo && !workspaceLoading,
     orgWideScope: orgWideDashboardScope,
   });
   const displayMetrics = React.useMemo(() => {
+    if (kpiV2 && dashboardKpis.payload?.workflow) {
+      return dashboardKpis.payload.workflow;
+    }
     const summary = dashboardSummary.summary;
     if (!dashboardSummary.enabled) {
       return workflowMetrics;
@@ -392,6 +419,8 @@ export default function DashboardPage() {
       dashboardSummary.person,
     );
   }, [
+    kpiV2,
+    dashboardKpis.payload,
     workflowMetrics,
     dashboardSummary.enabled,
     dashboardSummary.summary,
@@ -424,6 +453,14 @@ export default function DashboardPage() {
     [scopedSalesLeads, scopedDeals],
   );
   const displayPipelineMetrics = React.useMemo(() => {
+    if (kpiV2 && dashboardKpis.payload?.pipeline) {
+      return {
+        total: dashboardKpis.payload.pipeline.openPipelineValue,
+        openDealCount: dashboardKpis.payload.pipeline.openDealCount,
+        leadEstimateContributors:
+          dashboardKpis.payload.pipeline.leadEstimateContributors,
+      };
+    }
     const summary = dashboardSummary.summary;
     if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) {
       return pipelineMetrics;
@@ -444,6 +481,8 @@ export default function DashboardPage() {
           : pipelineMetrics.leadEstimateContributors,
     };
   }, [
+    kpiV2,
+    dashboardKpis.payload,
     pipelineMetrics,
     dashboardSummary.enabled,
     dashboardSummary.summary,
@@ -451,32 +490,67 @@ export default function DashboardPage() {
   ]);
   const pipelineValue = displayPipelineMetrics.total;
   const displayPipelineByStage = React.useMemo(() => {
+    if (kpiV2 && dashboardKpis.payload?.pipelineByStage) {
+      return dashboardKpis.payload.pipelineByStage;
+    }
     const summary = dashboardSummary.summary;
     if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) return null;
     const byStage = summary.pipelineByStage;
     if (!byStage || typeof byStage !== "object") return null;
     return byStage;
-  }, [dashboardSummary.enabled, dashboardSummary.summary, orgWideDashboardScope]);
+  }, [
+    kpiV2,
+    dashboardKpis.payload,
+    dashboardSummary.enabled,
+    dashboardSummary.summary,
+    orgWideDashboardScope,
+  ]);
   const displayChannelMix = React.useMemo(() => {
+    if (kpiV2 && dashboardKpis.payload?.channelMix) {
+      return dashboardKpis.payload.channelMix;
+    }
     const summary = dashboardSummary.summary;
     if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) return null;
     const mix = summary.channelMix;
     if (!mix || typeof mix !== "object") return null;
     return mix;
-  }, [dashboardSummary.enabled, dashboardSummary.summary, orgWideDashboardScope]);
+  }, [
+    kpiV2,
+    dashboardKpis.payload,
+    dashboardSummary.enabled,
+    dashboardSummary.summary,
+    orgWideDashboardScope,
+  ]);
   const displayFunnelByChannel = React.useMemo(() => {
+    if (kpiV2 && dashboardKpis.payload?.funnelByChannel) {
+      return dashboardKpis.payload.funnelByChannel;
+    }
     const summary = dashboardSummary.summary;
     if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) return null;
     const byChannel = summary.funnelByChannel;
     if (!byChannel || typeof byChannel !== "object") return null;
     return byChannel;
-  }, [dashboardSummary.enabled, dashboardSummary.summary, orgWideDashboardScope]);
+  }, [
+    kpiV2,
+    dashboardKpis.payload,
+    dashboardSummary.enabled,
+    dashboardSummary.summary,
+    orgWideDashboardScope,
+  ]);
   const liveClosedValue = scopedDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
   const liveWonDealCount = scopedDeals.filter((d) => d.stage === "won").length;
   const summaryClosed = React.useMemo(() => {
+    if (kpiV2 && dashboardKpis.payload) {
+      return {
+        closedRevenue: dashboardKpis.payload.closedRevenue,
+        wonDealCount: dashboardKpis.payload.wonDealCount,
+      };
+    }
     if (!dashboardSummary.enabled || !orgWideDashboardScope) return null;
     return summaryClosedRevenue(dashboardSummary.summary, timeRange);
   }, [
+    kpiV2,
+    dashboardKpis.payload,
     dashboardSummary.enabled,
     dashboardSummary.summary,
     orgWideDashboardScope,

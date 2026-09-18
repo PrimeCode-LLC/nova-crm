@@ -22,13 +22,35 @@ import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 export function DealDetailView({ dealId }: { dealId: string }) {
   const ws = useWorkspace();
   const { localDeals, patchLocalDeal } = useLocalDeals();
-  const deal = React.useMemo(
+  const [fetchedDeal, setFetchedDeal] = React.useState<(typeof ws.deals)[number] | null>(null);
+  const [fetchDone, setFetchDone] = React.useState(false);
+  const dealFromWs = React.useMemo(
     () => ws.deals.find((d) => d.id === dealId) ?? localDeals.find((d) => d.id === dealId),
     [ws.deals, localDeals, dealId],
   );
+  const deal = dealFromWs ?? fetchedDeal ?? undefined;
+
+  React.useEffect(() => {
+    if (dealFromWs || ws.isDemo) {
+      setFetchDone(true);
+      return;
+    }
+    let cancelled = false;
+    setFetchDone(false);
+    void import("@/lib/crm/fetch-crm-entity-by-id-client").then(({ fetchDealByIdClient }) =>
+      fetchDealByIdClient(dealId).then((res) => {
+        if (cancelled) return;
+        if (res.status === "ok") setFetchedDeal(res.entity);
+        setFetchDone(true);
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [dealId, dealFromWs, ws.isDemo]);
 
   if (!deal) {
-    if (ws.workspaceLoading) {
+    if (ws.workspaceLoading || (!ws.isDemo && !fetchDone)) {
       return (
         <PageBody>
           <WorkspacePageSkeleton />

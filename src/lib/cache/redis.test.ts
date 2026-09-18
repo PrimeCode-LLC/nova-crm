@@ -6,6 +6,9 @@ import {
   cacheGetJson,
   cacheSet,
   cacheSetJson,
+  cacheSetJsonWithMeta,
+  cacheGetJsonWithMeta,
+  cacheSetNx,
   closeRedis,
   getRedis,
   isRedisConfigured,
@@ -82,6 +85,30 @@ describe.skipIf(!canRun)("redis cache helper (live)", () => {
     expect(await cacheGetJson<typeof payload>(key)).toEqual(payload);
     expect(await cacheDel(key)).toBe(true);
   });
+
+  it("SET NX and meta envelope round-trip", async () => {
+    process.env.REDIS_URL = redisUrl!;
+    await closeRedis();
+
+    const lockKey = `${prefix}:lock`;
+    expect(await cacheSetNx(lockKey, "a", 60)).toBe(true);
+    expect(await cacheSetNx(lockKey, "b", 60)).toBe(false);
+
+    const metaKey = `${prefix}:meta`;
+    const inner = { n: 1 };
+    expect(
+      await cacheSetJsonWithMeta(metaKey, inner, {
+        softTtlSeconds: 60,
+        hardTtlSeconds: 120,
+      }),
+    ).toBe(true);
+    const entry = await cacheGetJsonWithMeta<typeof inner>(metaKey);
+    expect(entry?.value).toEqual(inner);
+    expect(typeof entry?.softExpiresAt).toBe("number");
+
+    await cacheDel(lockKey);
+    await cacheDel(metaKey);
+  });
 });
 
 describe("redis cache helper (unconfigured)", () => {
@@ -95,6 +122,8 @@ describe("redis cache helper (unconfigured)", () => {
     expect(await cacheGet("any")).toBeNull();
     expect(await cacheSet("any", "x")).toBe(false);
     expect(await cacheDel("any")).toBe(false);
+    expect(await cacheSetNx("any", "x", 10)).toBe(false);
+    expect(await cacheGetJsonWithMeta("any")).toBeNull();
 
     if (prev === undefined) delete process.env.REDIS_URL;
     else process.env.REDIS_URL = prev;

@@ -31,6 +31,12 @@ import {
   pathMatchesCollectionGroup,
 } from "@/lib/db/document-shim/path";
 import {
+  buildPayloadFilterWhere,
+  buildPgDocumentOrderBy,
+  planQueryPushdown,
+} from "@/lib/db/document-shim/query-pushdown";
+import { withDocumentQuerySingleFlight, invalidateDocumentQueryCache } from "@/lib/db/document-shim/query-singleflight";
+import {
   coerceInstantMs,
   deserializePayload,
 } from "@/lib/db/document-shim/timestamp";
@@ -335,6 +341,7 @@ async function writeDocumentInTx(
       updatedAt: now,
     },
   });
+  invalidateDocumentQueryCache(parsed.collectionRoot);
 }
 
 /**
@@ -415,6 +422,7 @@ export async function runDocumentTransaction<T>(
           await syncCrmEntityInTx(tx, crmEntity, parsed.segments[1]!, {}, true);
         }
         await tx.pgDocument.deleteMany({ where: { path } });
+        invalidateDocumentQueryCache(parsed.collectionRoot);
       },
     });
   });
@@ -452,6 +460,8 @@ export async function deleteDocumentSubtree(path: string): Promise<number> {
       },
     }),
   );
+  // Subtree deletes can span collections — drop the whole short-lived query cache.
+  invalidateDocumentQueryCache();
   return result.count;
 }
 
@@ -635,83 +645,36 @@ async function queryCrmEntityDocuments(
   return docs;
 }
 
-export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
-  if (!isDatabaseConfigured()) return [];
-
-  const organizationId = organizationIdFromSpec(spec);
-
-  const crmEntity =
-    !spec.collectionGroup && spec.collectionRoot
-      ? crmEntityFromCollection(spec.collectionRoot)
-      : null;
-  if (crmEntity) {
-    return queryCrmEntityDocuments(crmEntity, spec);
-  }
-
-  const loadRows = async (tx: TenantTx) => {
-    if (spec.collectionGroup) {
-      // Platform / cross-path scans still need bypass; callers must filter.
-      return tx.pgDocument.findMany(
-        organizationId
-          ? {
-              where: {
-                OR: [
-                  { organizationId },
-                  {
-                    AND: [
-                      { organizationId: null },
-                      {
-                        payload: {
-                          path: ["organizationId"],
-                          equals: organizationId,
-                        },
-                      },
-                    ],
-                  },
-                ],
-              },
-            }
-          : undefined,
-      );
-    }
-
-    const where: Prisma.PgDocumentWhereInput = {
-      collectionRoot: spec.collectionRoot!,
-      ...(spec.pathPrefix ? { path: { startsWith: spec.pathPrefix } } : {}),
-    };
-
-    if (organizationId) {
-      where.OR = [
-        { organizationId },
-        {
-          AND: [
-            { organizationId: null },
-            {
-              payload: {
-                path: ["organizationId"],
-                equals: organizationId,
-              },
+function organizationWhereClause(
+  organizationId: string,
+): Prisma.PgDocumentWhereInput {
+  return {
+    OR: [
+      { organizationId },
+      {
+        AND: [
+          { organizationId: null },
+          {
+            payload: {
+              path: ["organizationId"],
+              equals: organizationId,
             },
-          ],
-        },
-      ];
-    }
-
-    return tx.pgDocument.findMany({ where });
+          },
+        ],
+      },
+    ],
   };
+}
 
-  const rows = organizationId
-    ? await withOrganizationScope(organizationId, loadRows)
-    : await withRlsBypass(loadRows);
-
-  let docs = rows.map((row) => ({
-    path: row.path,
-    organizationId: row.organizationId,
-    collectionRoot: row.collectionRoot,
-    payload: deserializePayload(row.payload as Record<string, unknown>),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }));
+/** Apply path / residual filter / sort / startAfter / limit in Node (legacy path). */
+function applyNodePostFilters(
+  docsIn: StoredDoc[],
+  spec: QuerySpec,
+  organizationId: string | undefined,
+  residualFilters: QueryFilter[],
+  options: { applyOrderBy: boolean; applyLimit: boolean },
+): StoredDoc[] {
+  let docs = docsIn;
 
   if (organizationId) {
     // Defense in depth: RLS allows null organization_id rows for every tenant.
@@ -730,7 +693,7 @@ export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
     docs = docs.filter((d) => isImmediateCollectionDocument(d.path, spec.pathPrefix!));
   }
 
-  for (const filter of spec.filters) {
+  for (const filter of residualFilters) {
     if (filter.field === "organizationId" && organizationId) {
       // Already applied via SQL + documentMatchesOrganization.
       continue;
@@ -748,9 +711,9 @@ export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
     });
   }
 
-  if (spec.orderBy) {
+  if (options.applyOrderBy && spec.orderBy) {
     const { field, direction } = spec.orderBy;
-    docs.sort((a, b) => {
+    docs = [...docs].sort((a, b) => {
       const av = a.payload[field];
       const bv = b.payload[field];
       const aMs = coerceInstantMs(av);
@@ -770,7 +733,12 @@ export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
   if (spec.startAfter?.length) {
     const cursor = spec.startAfter;
     const idx = docs.findIndex((d) => {
-      if (cursor.length === 1 && typeof cursor[0] === "object" && cursor[0] !== null && "id" in cursor[0]) {
+      if (
+        cursor.length === 1 &&
+        typeof cursor[0] === "object" &&
+        cursor[0] !== null &&
+        "id" in cursor[0]
+      ) {
         return d.path.endsWith(`/${(cursor[0] as { id: string }).id}`);
       }
       return false;
@@ -778,11 +746,211 @@ export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
     if (idx >= 0) docs = docs.slice(idx + 1);
   }
 
-  if (spec.limit != null) {
+  if (options.applyLimit && spec.limit != null) {
     docs = docs.slice(0, spec.limit);
   }
 
   return docs;
+}
+
+function docsFingerprint(docs: StoredDoc[]): string {
+  return docs.map((d) => d.path).join("\n");
+}
+
+/**
+ * Full Node-side path (pre-pushdown behavior): load collection/org rows, then
+ * filter/sort/limit in process. Kept for fallback + dual-run verification.
+ */
+async function queryDocumentsNodePath(spec: QuerySpec): Promise<StoredDoc[]> {
+  const organizationId = organizationIdFromSpec(spec);
+
+  const loadRows = async (tx: TenantTx) => {
+    if (spec.collectionGroup) {
+      return tx.pgDocument.findMany(
+        organizationId
+          ? { where: organizationWhereClause(organizationId) }
+          : undefined,
+      );
+    }
+
+    const where: Prisma.PgDocumentWhereInput = {
+      collectionRoot: spec.collectionRoot!,
+      ...(spec.pathPrefix ? { path: { startsWith: spec.pathPrefix } } : {}),
+      ...(organizationId ? organizationWhereClause(organizationId) : {}),
+    };
+
+    return tx.pgDocument.findMany({ where });
+  };
+
+  const rows = organizationId
+    ? await withOrganizationScope(organizationId, loadRows)
+    : await withRlsBypass(loadRows);
+
+  const docs = rows.map((row) => ({
+    path: row.path,
+    organizationId: row.organizationId,
+    collectionRoot: row.collectionRoot,
+    payload: deserializePayload(row.payload as Record<string, unknown>),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }));
+
+  return applyNodePostFilters(docs, spec, organizationId, spec.filters, {
+    applyOrderBy: true,
+    applyLimit: true,
+  });
+}
+
+async function queryDocumentsWithPushdown(spec: QuerySpec): Promise<{
+  docs: StoredDoc[];
+  sqlRowCount: number;
+  plan: ReturnType<typeof planQueryPushdown>;
+}> {
+  const organizationId = organizationIdFromSpec(spec);
+  const plan = planQueryPushdown(spec);
+
+  const loadRows = async (tx: TenantTx) => {
+    if (spec.collectionGroup) {
+      // Unchanged: collectionGroup still loads org-scoped rows; Node filters path.
+      return tx.pgDocument.findMany(
+        organizationId
+          ? { where: organizationWhereClause(organizationId) }
+          : undefined,
+      );
+    }
+
+    const andClauses: Prisma.PgDocumentWhereInput[] = [
+      { collectionRoot: spec.collectionRoot! },
+    ];
+
+    if (spec.pathPrefix) {
+      // Broaden with startsWith; Node still applies isImmediateCollectionDocument.
+      const prefix = spec.pathPrefix.replace(/\/+$/, "");
+      andClauses.push({ path: { startsWith: `${prefix}/` } });
+    }
+
+    if (organizationId) {
+      andClauses.push(organizationWhereClause(organizationId));
+    }
+
+    for (const filter of plan.pushedFilters) {
+      const clause = buildPayloadFilterWhere(filter);
+      if (clause) andClauses.push(clause);
+    }
+
+    const where: Prisma.PgDocumentWhereInput = { AND: andClauses };
+    const orderBy = buildPgDocumentOrderBy(spec.orderBy, plan.pushOrderBy);
+
+    return tx.pgDocument.findMany({
+      where,
+      ...(orderBy ? { orderBy } : {}),
+      ...(plan.pushLimit && spec.limit != null ? { take: spec.limit } : {}),
+    });
+  };
+
+  const rows = organizationId
+    ? await withOrganizationScope(organizationId, loadRows)
+    : await withRlsBypass(loadRows);
+
+  const docs = rows.map((row) => ({
+    path: row.path,
+    organizationId: row.organizationId,
+    collectionRoot: row.collectionRoot,
+    payload: deserializePayload(row.payload as Record<string, unknown>),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }));
+
+  const residualForNode = [
+    ...plan.residualFilters,
+    // organizationId residual is handled inside applyNodePostFilters via documentMatchesOrganization
+  ];
+
+  const finalDocs = applyNodePostFilters(docs, spec, organizationId, residualForNode, {
+    applyOrderBy: !plan.pushOrderBy,
+    applyLimit: !plan.pushLimit,
+  });
+
+  return { docs: finalDocs, sqlRowCount: rows.length, plan };
+}
+
+function isPushdownVerifyEnabled(): boolean {
+  return process.env.DOCUMENT_SHIM_PUSHDOWN_VERIFY === "1";
+}
+
+function isQueryStatsEnabled(): boolean {
+  return process.env.DOCUMENT_SHIM_QUERY_STATS === "1";
+}
+
+export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
+  if (!isDatabaseConfigured()) return [];
+
+  const crmEntity =
+    !spec.collectionGroup && spec.collectionRoot
+      ? crmEntityFromCollection(spec.collectionRoot)
+      : null;
+  if (crmEntity) {
+    return queryCrmEntityDocuments(crmEntity, spec);
+  }
+
+  return withDocumentQuerySingleFlight(spec, async () => {
+    if (isPushdownVerifyEnabled()) {
+      const [pushed, legacy] = await Promise.all([
+        queryDocumentsWithPushdown(spec),
+        queryDocumentsNodePath(spec),
+      ]);
+      const a = docsFingerprint(pushed.docs);
+      const b = docsFingerprint(legacy);
+      if (a !== b) {
+        console.error("[document-shim] pushdown verify mismatch", {
+          collectionRoot: spec.collectionRoot,
+          collectionGroup: spec.collectionGroup,
+          pathPrefix: spec.pathPrefix,
+          reasons: pushed.plan.reasons,
+          pushedCount: pushed.docs.length,
+          legacyCount: legacy.length,
+          pushedPaths: pushed.docs.slice(0, 20).map((d) => d.path),
+          legacyPaths: legacy.slice(0, 20).map((d) => d.path),
+        });
+        // Prefer legacy (proven) when mismatch — never ship wrong results.
+        return legacy;
+      }
+      if (isQueryStatsEnabled()) {
+        console.info("[document-shim] query stats", {
+          collectionRoot: spec.collectionRoot,
+          sqlRows: pushed.sqlRowCount,
+          finalDocs: pushed.docs.length,
+          pushedFilters: pushed.plan.pushedFilters.map((f) => `${f.field}${f.op}`),
+          pushLimit: pushed.plan.pushLimit,
+          pushOrderBy: pushed.plan.pushOrderBy,
+          reasons: pushed.plan.reasons,
+        });
+      }
+      return pushed.docs;
+    }
+
+    const result = await queryDocumentsWithPushdown(spec);
+    if (isQueryStatsEnabled()) {
+      console.info("[document-shim] query stats", {
+        collectionRoot: spec.collectionRoot,
+        sqlRows: result.sqlRowCount,
+        finalDocs: result.docs.length,
+        pushedFilters: result.plan.pushedFilters.map((f) => `${f.field}${f.op}`),
+        pushLimit: result.plan.pushLimit,
+        pushOrderBy: result.plan.pushOrderBy,
+        reasons: result.plan.reasons,
+      });
+    }
+    return result.docs;
+  });
+}
+
+/** @internal test / admin — run legacy Node path only. */
+export async function queryDocumentsLegacyForTests(
+  spec: QuerySpec,
+): Promise<StoredDoc[]> {
+  if (!isDatabaseConfigured()) return [];
+  return queryDocumentsNodePath(spec);
 }
 
 export async function listCollectionPaths(

@@ -95,7 +95,9 @@ import {
   type MailThread,
 } from "@/lib/email/thread-inbound";
 import type { Contact, Lead } from "@/lib/types";
+import { resolveLeadIdsByEmailClient } from "@/lib/crm-dedupe-client";
 import { buildLeadEmailToIdMap, leadEmailsWithContact } from "@/lib/followup-plans";
+import { extractEmailAddress } from "@/lib/followup-plan-reply";
 import {
   Collapsible,
   CollapsibleContent,
@@ -575,10 +577,40 @@ export default function InboxWorkspace() {
     [contacts],
   );
 
-  const emailToLeadId = React.useMemo(
-    () => buildLeadEmailToIdMap(leads, contacts),
-    [leads, contacts],
-  );
+  const [remoteEmailMap, setRemoteEmailMap] = React.useState<Record<string, string>>({});
+  const resolvingEmailsRef = React.useRef(new Set<string>());
+
+  const emailToLeadId = React.useMemo(() => {
+    const map = buildLeadEmailToIdMap(leads, contacts);
+    for (const [email, leadId] of Object.entries(remoteEmailMap)) {
+      if (email && leadId) map.set(email, leadId);
+    }
+    return map;
+  }, [leads, contacts, remoteEmailMap]);
+
+  React.useEffect(() => {
+    if (isDemo) return;
+    const localMap = buildLeadEmailToIdMap(leads, contacts);
+    const unresolved: string[] = [];
+    for (const messages of Object.values(inboundByMailbox)) {
+      for (const message of messages ?? []) {
+        const fromAddr = extractEmailAddress(message.from);
+        if (!fromAddr || localMap.has(fromAddr) || remoteEmailMap[fromAddr]) continue;
+        unresolved.push(fromAddr);
+      }
+    }
+    const uniqueUnresolved = [...new Set(unresolved)].filter(
+      (e) => !resolvingEmailsRef.current.has(e),
+    );
+    if (!uniqueUnresolved.length) return;
+    for (const e of uniqueUnresolved) resolvingEmailsRef.current.add(e);
+    void resolveLeadIdsByEmailClient(uniqueUnresolved.slice(0, 50)).then((byEmail) => {
+      for (const e of uniqueUnresolved) resolvingEmailsRef.current.delete(e);
+      if (Object.keys(byEmail).length === 0) return;
+      setRemoteEmailMap((prev) => ({ ...prev, ...byEmail }));
+    });
+  }, [isDemo, leads, contacts, inboundByMailbox, remoteEmailMap]);
+
   const leadById = React.useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads]);
   const contactById = React.useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts]);
   const emailToContactId = React.useMemo(() => {

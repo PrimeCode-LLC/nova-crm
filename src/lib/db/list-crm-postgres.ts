@@ -12,7 +12,13 @@ import type {
 } from "@/generated/prisma/client";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withOrganizationScope } from "@/lib/db/tenant-scope";
-import { leadFromPostgresRow } from "@/lib/db/list-leads-postgres";
+import {
+  accountListFilterWhere,
+  contactListFilterWhere,
+  dealListFilterWhere,
+  type CrmEntityListFilters,
+} from "@/lib/db/crm-list-filters";
+import { countLeadsInPostgres, leadFromPostgresRow } from "@/lib/db/list-leads-postgres";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import type { Account, Contact, Deal, Lead, PipelineStage } from "@/lib/types";
 
@@ -30,6 +36,7 @@ export type ListCrmPostgresOptions = {
   viewerUid?: string;
   limit?: number;
   cursor?: string | null;
+  filters?: CrmEntityListFilters;
 };
 
 export type ListAccountsPostgresPage = {
@@ -120,6 +127,7 @@ function cursorWhere(
   decoded: { updatedAt: Date; id: string } | null,
   viewerUid?: string | null,
   narrowToMember?: boolean,
+  filterClause?: Prisma.AccountWhereInput,
 ): Prisma.AccountWhereInput {
   const narrow = Boolean(narrowToMember) && Boolean(viewerUid?.trim());
   const cursorClause: Prisma.AccountWhereInput | null = decoded
@@ -130,19 +138,123 @@ function cursorWhere(
         ],
       }
     : null;
+  const scopeParts: Prisma.AccountWhereInput[] = [
+    ...(filterClause && Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [ownedMemberScopeWhere(viewerUid!)] : []),
+    ...(cursorClause ? [cursorClause] : []),
+  ];
   return {
     organizationId,
-    ...(narrow
-      ? {
-          AND: [
-            ownedMemberScopeWhere(viewerUid!),
-            ...(cursorClause ? [cursorClause] : []),
-          ],
-        }
-      : cursorClause
-        ? cursorClause
-        : {}),
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
   };
+}
+
+function accountFilterClause(filters: CrmEntityListFilters | undefined): Prisma.AccountWhereInput {
+  return accountListFilterWhere(filters);
+}
+
+function contactFilterClause(filters: CrmEntityListFilters | undefined): Prisma.ContactWhereInput {
+  return contactListFilterWhere(filters);
+}
+
+function dealFilterClause(filters: CrmEntityListFilters | undefined): Prisma.DealWhereInput {
+  return dealListFilterWhere(filters);
+}
+
+function scopedOwnedCountWhere(
+  organizationId: string,
+  narrow: boolean,
+  viewerUid: string,
+  filterClause: Prisma.AccountWhereInput,
+): Prisma.AccountWhereInput {
+  const scopeParts: Prisma.AccountWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [ownedMemberScopeWhere(viewerUid)] : []),
+  ];
+  return {
+    organizationId,
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
+  };
+}
+
+export async function countAccountsInPostgres(
+  options: Omit<ListCrmPostgresOptions, "cursor" | "limit">,
+): Promise<number> {
+  if (!isDatabaseConfigured()) return 0;
+  const organizationId = options.organizationId.trim();
+  if (!organizationId) return 0;
+  const narrow = Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+  const where = scopedOwnedCountWhere(
+    organizationId,
+    narrow,
+    options.viewerUid ?? "",
+    accountFilterClause(options.filters),
+  );
+  return withOrganizationScope(organizationId, (tx) => tx.account.count({ where }));
+}
+
+export async function countContactsInPostgres(
+  options: Omit<ListCrmPostgresOptions, "cursor" | "limit">,
+): Promise<number> {
+  if (!isDatabaseConfigured()) return 0;
+  const organizationId = options.organizationId.trim();
+  if (!organizationId) return 0;
+  const narrow = Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+  const filterClause = contactFilterClause(options.filters);
+  const scopeParts: Prisma.ContactWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [ownedMemberScopeWhere(options.viewerUid!) as Prisma.ContactWhereInput] : []),
+  ];
+  const where: Prisma.ContactWhereInput = {
+    organizationId,
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
+  };
+  return withOrganizationScope(organizationId, (tx) => tx.contact.count({ where }));
+}
+
+export async function countDealsInPostgres(
+  options: Omit<ListCrmPostgresOptions, "cursor" | "limit">,
+): Promise<number> {
+  if (!isDatabaseConfigured()) return 0;
+  const organizationId = options.organizationId.trim();
+  if (!organizationId) return 0;
+  const narrow = Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+  const filterClause = dealFilterClause(options.filters);
+  const scopeParts: Prisma.DealWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [ownedMemberScopeWhere(options.viewerUid!) as Prisma.DealWhereInput] : []),
+  ];
+  const where: Prisma.DealWhereInput = {
+    organizationId,
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
+  };
+  return withOrganizationScope(organizationId, (tx) => tx.deal.count({ where }));
+}
+
+export type CrmEntityCounts = {
+  leads: number;
+  accounts: number;
+  contacts: number;
+  deals: number;
+};
+
+export async function countCrmEntitiesInPostgres(input: {
+  organizationId: string;
+  narrowToMember?: boolean;
+  viewerUid?: string;
+}): Promise<CrmEntityCounts> {
+  const base = {
+    organizationId: input.organizationId,
+    narrowToMember: input.narrowToMember,
+    viewerUid: input.viewerUid,
+  };
+  const [leads, accounts, contacts, deals] = await Promise.all([
+    countLeadsInPostgres(base),
+    countAccountsInPostgres(base),
+    countContactsInPostgres(base),
+    countDealsInPostgres(base),
+  ]);
+  return { leads, accounts, contacts, deals };
 }
 
 /** Map a dual-written Postgres account row into the workspace `Account` type. */
@@ -224,6 +336,7 @@ export async function listAccountsPageFromPostgres(
     decoded,
     options.viewerUid,
     options.narrowToMember,
+    accountFilterClause(options.filters),
   );
 
   const rows = await withOrganizationScope(organizationId, (tx) =>
@@ -256,12 +369,25 @@ export async function listContactsPageFromPostgres(
 
   const take = clampPageSize(options.limit);
   const decoded = decodeCrmListCursor(options.cursor);
-  const where = cursorWhere(
+  const narrow = Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+  const cursorClause: Prisma.ContactWhereInput | null = decoded
+    ? {
+        OR: [
+          { updatedAt: { lt: decoded.updatedAt } },
+          { updatedAt: decoded.updatedAt, id: { lt: decoded.id } },
+        ],
+      }
+    : null;
+  const filterClause = contactFilterClause(options.filters);
+  const scopeParts: Prisma.ContactWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [ownedMemberScopeWhere(options.viewerUid!) as Prisma.ContactWhereInput] : []),
+    ...(cursorClause ? [cursorClause] : []),
+  ];
+  const where: Prisma.ContactWhereInput = {
     organizationId,
-    decoded,
-    options.viewerUid,
-    options.narrowToMember,
-  ) as Prisma.ContactWhereInput;
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
+  };
 
   const rows = await withOrganizationScope(organizationId, (tx) =>
     tx.contact.findMany({
@@ -293,12 +419,25 @@ export async function listDealsPageFromPostgres(
 
   const take = clampPageSize(options.limit);
   const decoded = decodeCrmListCursor(options.cursor);
-  const where = cursorWhere(
+  const narrow = Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+  const cursorClause: Prisma.DealWhereInput | null = decoded
+    ? {
+        OR: [
+          { updatedAt: { lt: decoded.updatedAt } },
+          { updatedAt: decoded.updatedAt, id: { lt: decoded.id } },
+        ],
+      }
+    : null;
+  const filterClause = dealFilterClause(options.filters);
+  const scopeParts: Prisma.DealWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [ownedMemberScopeWhere(options.viewerUid!) as Prisma.DealWhereInput] : []),
+    ...(cursorClause ? [cursorClause] : []),
+  ];
+  const where: Prisma.DealWhereInput = {
     organizationId,
-    decoded,
-    options.viewerUid,
-    options.narrowToMember,
-  ) as Prisma.DealWhereInput;
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
+  };
 
   const rows = await withOrganizationScope(organizationId, (tx) =>
     tx.deal.findMany({
@@ -435,6 +574,32 @@ export async function getLeadFromPostgres(
     tx.lead.findFirst({ where: { id, organizationId } }),
   );
   return row ? leadFromPostgresRow(row, { slim: false }) : null;
+}
+
+/** Lightweight owner lookup for timeline / persist scoping (Phase 4). */
+export async function getLeadOwnerIdFromPostgres(
+  organizationId: string,
+  id: string,
+): Promise<string | null> {
+  if (!isDatabaseConfigured() || !organizationId.trim() || !id.trim()) return null;
+  const row = await withOrganizationScope(organizationId, (tx) =>
+    tx.lead.findFirst({
+      where: { id, organizationId },
+      select: { ownerId: true },
+    }),
+  );
+  return row?.ownerId?.trim() ?? null;
+}
+
+export async function getDealFromPostgres(
+  organizationId: string,
+  id: string,
+): Promise<Deal | null> {
+  if (!isDatabaseConfigured() || !organizationId.trim() || !id.trim()) return null;
+  const row = await withOrganizationScope(organizationId, (tx) =>
+    tx.deal.findFirst({ where: { id, organizationId } }),
+  );
+  return row ? dealFromPostgresRow(row) : null;
 }
 
 /** Lookup lead id by denormalized `contactEmail` in payload (Instantly sync). */

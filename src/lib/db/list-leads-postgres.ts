@@ -9,6 +9,7 @@
 import type { Lead as PrismaLead, Prisma } from "@/generated/prisma/client";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withOrganizationScope } from "@/lib/db/tenant-scope";
+import { leadListFilterWhere, type LeadListFilters } from "@/lib/db/crm-list-filters";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import type { Lead } from "@/lib/types";
 
@@ -48,6 +49,8 @@ export type ListLeadsPostgresOptions = {
   limit?: number;
   /** Opaque cursor from a previous page (`updatedAt|id`). */
   cursor?: string | null;
+  /** Phase 5 — server-side list filters (search, stage, channel, …). */
+  filters?: LeadListFilters;
 };
 
 export type ListLeadsPostgresPage = {
@@ -199,18 +202,16 @@ export async function listLeadsPageFromPostgres(
       }
     : null;
 
+  const filterClause = leadListFilterWhere(options.filters);
+  const scopeParts: Prisma.LeadWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [memberLeadScopeWhere(options.viewerUid!)] : []),
+    ...(cursorClause ? [cursorClause] : []),
+  ];
+
   const where: Prisma.LeadWhereInput = {
     organizationId,
-    ...(narrow
-      ? {
-          AND: [
-            memberLeadScopeWhere(options.viewerUid!),
-            ...(cursorClause ? [cursorClause] : []),
-          ],
-        }
-      : cursorClause
-        ? cursorClause
-        : {}),
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
   };
 
   const rows = await withOrganizationScope(organizationId, (tx) =>
@@ -230,6 +231,30 @@ export async function listLeadsPageFromPostgres(
     hasMore && last ? encodeLeadsListCursor(last.updatedAt, last.id) : null;
 
   return { leads, nextCursor, hasMore };
+}
+
+/** Count leads matching list scope/filters (no cursor). */
+export async function countLeadsInPostgres(
+  options: Omit<ListLeadsPostgresOptions, "cursor" | "limit">,
+): Promise<number> {
+  if (!isDatabaseConfigured()) return 0;
+  const organizationId = options.organizationId.trim();
+  if (!organizationId) return 0;
+
+  const narrow =
+    Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+  const filterClause = leadListFilterWhere(options.filters);
+  const scopeParts: Prisma.LeadWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [memberLeadScopeWhere(options.viewerUid!)] : []),
+  ];
+
+  const where: Prisma.LeadWhereInput = {
+    organizationId,
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
+  };
+
+  return withOrganizationScope(organizationId, (tx) => tx.lead.count({ where }));
 }
 
 /**

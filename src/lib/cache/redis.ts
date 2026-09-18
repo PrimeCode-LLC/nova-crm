@@ -160,3 +160,65 @@ export async function cacheSetJson(
 ): Promise<boolean> {
   return cacheSet(key, JSON.stringify(value), ttlSeconds);
 }
+
+/**
+ * SET key value EX ttl NX — returns true only when the key did not exist (lock acquired).
+ */
+export async function cacheSetNx(
+  key: string,
+  value: string,
+  ttlSeconds: number,
+): Promise<boolean> {
+  const redis = await getRedis();
+  if (!redis) return false;
+  const ttl = Math.max(1, Math.floor(ttlSeconds));
+  try {
+    const result = await redis.set(key, value, { NX: true, EX: ttl });
+    return result === "OK";
+  } catch (err) {
+    console.error("[redis] SET NX failed", key, err);
+    return false;
+  }
+}
+
+/** JSON envelope for stale-while-revalidate (soft expiry inside a longer Redis TTL). */
+export type CacheJsonWithMeta<T> = {
+  value: T;
+  /** Epoch ms — after this, readers may serve stale and trigger background refresh. */
+  softExpiresAt: number;
+};
+
+export async function cacheGetJsonWithMeta<T>(
+  key: string,
+): Promise<CacheJsonWithMeta<T> | null> {
+  const raw = await cacheGet(key);
+  if (raw == null) return null;
+  try {
+    const parsed = JSON.parse(raw) as CacheJsonWithMeta<T>;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "value" in parsed &&
+      typeof parsed.softExpiresAt === "number"
+    ) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export async function cacheSetJsonWithMeta<T>(
+  key: string,
+  value: T,
+  options: { softTtlSeconds: number; hardTtlSeconds: number },
+): Promise<boolean> {
+  const soft = Math.max(1, Math.floor(options.softTtlSeconds));
+  const hard = Math.max(soft, Math.floor(options.hardTtlSeconds));
+  const envelope: CacheJsonWithMeta<T> = {
+    value,
+    softExpiresAt: Date.now() + soft * 1000,
+  };
+  return cacheSet(key, JSON.stringify(envelope), hard);
+}

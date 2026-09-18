@@ -3,6 +3,8 @@
 **Canonical path:** `Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md`  
 **Loaded into agent context via:** `AGENTS.md` (`@` include) and `.cursor/rules/nova-crm-engineering-rules.mdc` (`alwaysApply`). Root `ENGINEERING_RULES.md` is a pointer only — edit this file.
 
+**Also binding:** [`NOVA-CRM-PRODUCTION-AGENT-RULES.md`](NOVA-CRM-PRODUCTION-AGENT-RULES.md) — live production data safety, testing, no regressions, no over-engineering, clarify-then-build.
+
 **Purpose:** This document is the standing contract for how Nova CRM is built. Every future development session — AI-assisted ("vibe coding") or human — should treat these as binding constraints, not suggestions. If a request conflicts with a rule here, flag the conflict before implementing; don't silently implement the request or silently implement the rule instead. Say what the tension is and ask.
 
 ---

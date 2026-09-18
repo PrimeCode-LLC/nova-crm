@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
+import { parseLeadListFilters } from "@/lib/db/crm-list-filters";
+import { resolveCrmListNarrowToMember } from "@/lib/db/crm-list-scope";
 import {
+  countLeadsInPostgres,
   LEADS_LIST_MAX_PAGE_SIZE,
   LEADS_LIST_PAGE_SIZE,
   listLeadsFromPostgres,
@@ -18,6 +21,8 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
  * - `limit` — page size (default 250, max 500); ignored when `all=1`
  * - `cursor` — opaque pagination cursor from a previous page
  * - `all=1` — walk pages server-side into one snapshot (workspace poll; still capped)
+ * - `q`, `stage`, `channel`, `ownerId`, `intakeKind`, `activeOnly`, `archivedOnly`, `isIdle` — server filters
+ * - `countOnly=1` — total matching rows (same scope/filters, no page body)
  *
  * When the flag is off, returns `{ enabled: false }` so clients keep Firestore.
  */
@@ -37,20 +42,40 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const narrow = url.searchParams.get("narrow") === "1";
+  const narrowToMember = resolveCrmListNarrowToMember(
+    guard.ctx.role,
+    url.searchParams.get("narrow"),
+  );
   const all = url.searchParams.get("all") === "1";
+  const countOnly = url.searchParams.get("countOnly") === "1";
   const cursor = url.searchParams.get("cursor");
   const limitRaw = url.searchParams.get("limit");
   const limit = limitRaw ? Number.parseInt(limitRaw, 10) : LEADS_LIST_PAGE_SIZE;
+  const filters = parseLeadListFilters(url);
   const organizationId = guard.ctx.session.organizationId;
   const viewerUid = guard.ctx.session.uid;
+  const listOpts = {
+    organizationId,
+    narrowToMember,
+    viewerUid,
+    filters,
+  };
 
   try {
+    if (countOnly) {
+      const totalCount = await countLeadsInPostgres(listOpts);
+      return NextResponse.json({
+        ok: true,
+        enabled: true,
+        source: "postgres" as const,
+        totalCount,
+        narrow: narrowToMember,
+      });
+    }
+
     if (all) {
       const leads = await listLeadsFromPostgres({
-        organizationId,
-        narrowToMember: narrow,
-        viewerUid,
+        ...listOpts,
         pageSize: Number.isFinite(limit) ? limit : LEADS_LIST_PAGE_SIZE,
       });
       return NextResponse.json({
@@ -65,9 +90,7 @@ export async function GET(req: Request) {
     }
 
     const page = await listLeadsPageFromPostgres({
-      organizationId,
-      narrowToMember: narrow,
-      viewerUid,
+      ...listOpts,
       limit: Number.isFinite(limit) ? Math.min(limit, LEADS_LIST_MAX_PAGE_SIZE) : LEADS_LIST_PAGE_SIZE,
       cursor,
     });

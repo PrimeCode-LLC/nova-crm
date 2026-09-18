@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import type { CrmEntity } from "@/lib/db/dual-write-crm";
+import { assertCrmLeadMutationAllowed } from "@/lib/db/crm-write-authz";
 import {
   deleteCrmEntityPostgres,
   bumpLeadActivityPostgres,
@@ -115,9 +116,50 @@ export async function POST(req: Request) {
   }
 
   const organizationId = guard.ctx.session.organizationId;
+  const viewerRole = guard.ctx.role;
   const body = parsed.data;
 
   try {
+    if (body.action === "delete" || body.action === "patch" || body.action === "upsert") {
+      const authz = await assertCrmLeadMutationAllowed({
+        organizationId,
+        entity: body.entity as CrmEntity,
+        id: body.id,
+        action: body.action,
+        viewerRole,
+        patch:
+          body.action === "patch"
+            ? body.patch
+            : body.action === "upsert"
+              ? body.doc
+              : undefined,
+        unset: body.action === "patch" ? body.unset : undefined,
+      });
+      if (!authz.ok) {
+        return NextResponse.json(
+          { ok: false, error: authz.error },
+          { status: authz.status },
+        );
+      }
+    }
+
+    if (body.action === "upsert_graph") {
+      const authz = await assertCrmLeadMutationAllowed({
+        organizationId,
+        entity: "lead",
+        id: body.lead.id,
+        action: "upsert",
+        viewerRole,
+        patch: body.lead.doc,
+      });
+      if (!authz.ok) {
+        return NextResponse.json(
+          { ok: false, error: authz.error },
+          { status: authz.status },
+        );
+      }
+    }
+
     let result;
     switch (body.action) {
       case "upsert":

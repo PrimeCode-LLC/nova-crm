@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { ArrowLeft, Mail, Phone, Link as LinkIcon, MapPin, Building2 } from "lucide-react";
 
@@ -25,13 +26,36 @@ import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { initials, fmtRelative } from "@/lib/format";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
+import type { Contact } from "@/lib/types";
 
 export function ContactDetailView({ contactId }: { contactId: string }) {
   const ws = useWorkspace();
-  const contact = ws.getContactById(contactId);
+  const [fetchedContact, setFetchedContact] = React.useState<Contact | null>(null);
+  const [fetchDone, setFetchDone] = React.useState(false);
+  const contactFromWs = ws.getContactById(contactId);
+  const contact = contactFromWs ?? fetchedContact ?? undefined;
+
+  React.useEffect(() => {
+    if (contactFromWs || ws.isDemo) {
+      setFetchDone(true);
+      return;
+    }
+    let cancelled = false;
+    setFetchDone(false);
+    void import("@/lib/crm/fetch-crm-entity-by-id-client").then(({ fetchContactByIdClient }) =>
+      fetchContactByIdClient(contactId).then((res) => {
+        if (cancelled) return;
+        if (res.status === "ok") setFetchedContact(res.entity);
+        setFetchDone(true);
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [contactId, contactFromWs, ws.isDemo]);
 
   if (!contact) {
-    if (ws.workspaceLoading) {
+    if (ws.workspaceLoading || (!ws.isDemo && !fetchDone)) {
       return (
         <PageBody>
           <WorkspacePageSkeleton />

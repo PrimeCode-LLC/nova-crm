@@ -20,6 +20,7 @@ import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 import { fmtCurrency, fmtDate } from "@/lib/format";
 import { Plus, Search, DollarSign, TrendingUp, Trophy, Target, ArrowUpDown } from "lucide-react";
 import { STAGES_BY_KEY } from "@/lib/constants";
@@ -44,6 +45,11 @@ export default function DealsPage() {
   const router = useRouter();
   const ws = useWorkspace();
   const { localDeals, addLocalDeal } = useLocalDeals();
+  const crmPages = useCrmEntityPages({
+    entity: "deals",
+    enabled: !ws.isDemo,
+    drain: true,
+  });
   const [query, setQuery] = React.useState("");
   const [sortKey, setSortKey] = React.useState<SortKey>("name");
   const [sortDir, setSortDir] = React.useState<SortDir>("asc");
@@ -78,7 +84,12 @@ export default function DealsPage() {
     [addLocalDeal, ws],
   );
 
-  const deals = React.useMemo(() => [...localDeals, ...ws.deals], [localDeals, ws.deals]);
+  const wsDeals = React.useMemo(() => {
+    if (crmPages.enabled) return crmPages.items as typeof ws.deals;
+    return ws.deals;
+  }, [crmPages.enabled, crmPages.items, ws.deals]);
+  const deals = React.useMemo(() => [...localDeals, ...wsDeals], [localDeals, wsDeals]);
+  const listLoading = ws.workspaceLoading || (crmPages.enabled && crmPages.loading);
 
   const filtered = React.useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -172,7 +183,7 @@ export default function DealsPage() {
         }
       />
       <PageBody>
-        {ws.workspaceLoading ? (
+        {listLoading ? (
           <WorkspacePageSkeleton />
         ) : listEmpty ? (
           <WorkspaceEmptyHint title="No deals in workspace" />

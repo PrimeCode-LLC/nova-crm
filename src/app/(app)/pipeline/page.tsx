@@ -14,6 +14,7 @@ import Link from "next/link";
 import { PRIORITY_TONE } from "@/lib/constants";
 import type { LeadPriority } from "@/lib/types";
 import { filterActiveLeads } from "@/lib/leads/lead-archive";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -32,7 +33,17 @@ const KanbanBoard = dynamic(
 );
 
 export default function PipelinePage() {
-  const { leads, isDemo, workspaceLoading } = useWorkspace();
+  const { leads: wsLeads, isDemo, workspaceLoading } = useWorkspace();
+  const crmPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: !isDemo,
+    drain: true,
+  });
+  const leads = React.useMemo(() => {
+    if (crmPages.enabled) return crmPages.items as typeof wsLeads;
+    return wsLeads;
+  }, [crmPages.enabled, crmPages.items, wsLeads]);
+  const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const { openQuickAdd } = useOpenQuickAdd();
   const [boardQuery, setBoardQuery] = React.useState("");
   const [priorityFilter, setPriorityFilter] = React.useState<LeadPriority[]>([]);
@@ -126,7 +137,7 @@ export default function PipelinePage() {
         }
       />
       <PageBody>
-        {workspaceLoading ? (
+        {listLoading ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && activeLeads.length === 0 ? (
           <WorkspaceEmptyHint title="No leads to show on the board" />

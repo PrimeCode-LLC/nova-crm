@@ -23,6 +23,7 @@ import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
 import { ProspectDraftBanner } from "@/components/prospects/prospect-draft-banner";
 import { filterActiveLeads } from "@/lib/leads/lead-archive";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 
 const LeadsTable = dynamic(
   () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
@@ -35,8 +36,18 @@ const LeadsTable = dynamic(
 function ProspectsPageInner() {
   const searchParams = useSearchParams();
   const ownerScope = ownerScopeFromQueryParam(searchParams.get("owner"));
-  const { leads, isDemo, workspaceLoading } = useWorkspace();
+  const { leads: wsLeads, isDemo, workspaceLoading } = useWorkspace();
   const { openNewProspectForm } = useOpenQuickAdd();
+  const crmPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: !isDemo,
+    filters: { activeOnly: true, intakeKind: "prospect" },
+  });
+  const leads = React.useMemo(() => {
+    if (crmPages.enabled) return crmPages.items as typeof wsLeads;
+    return wsLeads;
+  }, [crmPages.enabled, crmPages.items, wsLeads]);
+  const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const tableRef = React.useRef<LeadsTableRef>(null);
   const [tableSession, setTableSession] = React.useState<{
     key: number;
@@ -198,7 +209,7 @@ function ProspectsPageInner() {
       />
       <PageBody contained>
         <ProspectDraftBanner />
-        {workspaceLoading ? (
+        {listLoading ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && prospectCount === 0 ? (
           <WorkspaceEmptyHint

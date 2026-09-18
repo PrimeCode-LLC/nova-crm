@@ -59,6 +59,7 @@ import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { getClientDb } from "@/lib/db/document-access/client";
 import { persistLeadGraphClient } from "@/lib/documents/persist-lead-graph-client";
 import { findAccountByDomain, findContactByEmail } from "@/lib/crm-dedupe";
+import { fetchCrmDedupeClient } from "@/lib/crm-dedupe-client";
 import {
   leadPickerTriggerLabel,
   selectTriggerLabelById,
@@ -396,7 +397,11 @@ function LeadFormBody({
     const emailTrim = values.email.trim();
     form.clearErrors("email");
     if (emailTrim) {
-      const existingContact = findContactByEmail(contacts, emailTrim);
+      let existingContact = findContactByEmail(contacts, emailTrim);
+      if (!existingContact) {
+        const remote = await fetchCrmDedupeClient({ email: emailTrim });
+        existingContact = remote.contact ?? undefined;
+      }
       if (existingContact) {
         form.setError("email", {
           type: "manual",
@@ -407,7 +412,7 @@ function LeadFormBody({
           action: {
             label: "View contact",
             onClick: () => {
-              router.push(`/contacts/${existingContact.id}`);
+              router.push(`/contacts/${existingContact!.id}`);
               onClose();
             },
           },
@@ -715,7 +720,11 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
 
     const emailTrim = values.email.trim();
     if (emailTrim) {
-      const existingContact = findContactByEmail(contacts, emailTrim);
+      let existingContact = findContactByEmail(contacts, emailTrim);
+      if (!existingContact) {
+        const remote = await fetchCrmDedupeClient({ email: emailTrim });
+        existingContact = remote.contact ?? undefined;
+      }
       if (existingContact) {
         form.setError("email", {
           type: "manual",
@@ -726,7 +735,7 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
           action: {
             label: "View contact",
             onClick: () => {
-              router.push(`/contacts/${existingContact.id}`);
+              router.push(`/contacts/${existingContact!.id}`);
               onClose();
             },
           },
@@ -738,7 +747,11 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
     if (values.accountMode === "new") {
       const domainInput = values.newCompanyDomain?.trim() ?? "";
       if (domainInput) {
-        const existingAccount = findAccountByDomain(accounts, domainInput);
+        let existingAccount = findAccountByDomain(accounts, domainInput);
+        if (!existingAccount) {
+          const remote = await fetchCrmDedupeClient({ domain: domainInput });
+          existingAccount = remote.account ?? undefined;
+        }
         if (existingAccount) {
           form.setError("newCompanyDomain", {
             type: "manual",
@@ -751,7 +764,7 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
               onClick: () => {
                 form.clearErrors(["newCompanyDomain", "accountId"]);
                 form.setValue("accountMode", "existing");
-                form.setValue("accountId", existingAccount.id);
+                form.setValue("accountId", existingAccount!.id);
                 form.setValue("newCompanyName", "");
                 form.setValue("newCompanyDomain", "");
                 toast.message("Switched to existing company", {
@@ -1027,7 +1040,11 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
     form.clearErrors("domain");
     const domainTrim = v.domain?.trim() ?? "";
     if (domainTrim) {
-      const existing = findAccountByDomain(accounts, domainTrim);
+      let existing = findAccountByDomain(accounts, domainTrim);
+      if (!existing) {
+        const remote = await fetchCrmDedupeClient({ domain: domainTrim });
+        existing = remote.account ?? undefined;
+      }
       if (existing) {
         form.setError("domain", {
           type: "manual",
@@ -1038,7 +1055,7 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
           action: {
             label: "Open company",
             onClick: () => {
-              router.push(`/accounts/${existing.id}`);
+              router.push(`/accounts/${existing!.id}`);
               onClose();
             },
           },

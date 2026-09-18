@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 import { fmtCurrency, fmtNumber, fmtRelative } from "@/lib/format";
 import { COMPANY_SIZES, REVENUE_RANGES } from "@/lib/constants";
 import { UserChip } from "@/components/common/user-chip";
@@ -141,7 +142,18 @@ function SortableTableHead({
 
 export default function AccountsPage() {
   const router = useRouter();
-  const { accounts, isDemo, workspaceLoading, getUserById } = useWorkspace();
+  const { accounts: wsAccounts, isDemo, workspaceLoading, getUserById } = useWorkspace();
+  const crmPages = useCrmEntityPages({
+    entity: "accounts",
+    enabled: !isDemo,
+    drain: true,
+    includeTotalCount: true,
+  });
+  const accounts = React.useMemo(() => {
+    if (crmPages.enabled) return crmPages.items as typeof wsAccounts;
+    return wsAccounts;
+  }, [crmPages.enabled, crmPages.items, wsAccounts]);
+  const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const { openQuickAdd } = useOpenQuickAdd();
   const [query, setQuery] = React.useState("");
   const [sortKey, setSortKey] = React.useState<SortKey | null>(null);
@@ -200,7 +212,7 @@ export default function AccountsPage() {
         }
       />
       <PageBody>
-        {workspaceLoading ? (
+        {listLoading ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && accounts.length === 0 ? (
           <WorkspaceEmptyHint title="No companies in workspace" />
@@ -362,7 +374,10 @@ export default function AccountsPage() {
 
             <div className="text-xs text-muted-foreground">
               Showing <span className="tabular-nums font-medium text-foreground">{fmtNumber(sortedRows.length)}</span> of{" "}
-              <span className="tabular-nums">{fmtNumber(accounts.length)}</span> companies
+              <span className="tabular-nums">
+                {fmtNumber(crmPages.totalCount ?? accounts.length)}
+              </span>{" "}
+              companies
             </div>
           </>
         )}

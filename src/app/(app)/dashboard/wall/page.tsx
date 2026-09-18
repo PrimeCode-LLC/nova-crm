@@ -34,6 +34,8 @@ import {
   flattenTimelineByLead,
 } from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
+import { useDashboardKpis } from "@/hooks/use-dashboard-kpis";
+import { isDashboardKpiApiV2Enabled } from "@/lib/dashboard-kpi-v2-flags";
 import {
   applyOrgDashboardSummaryToWorkflowMetrics,
   applyPersonDashboardGaugesToWorkflowMetrics,
@@ -331,11 +333,22 @@ function DashboardWallPageInner() {
     channelScopeEmpty: true,
     ownerScopeIsAll: true,
   });
+  const kpiV2 = isDashboardKpiApiV2Enabled();
+  const dashboardKpis = useDashboardKpis({
+    enabled: kpiV2 && !isDemo,
+    channels: [],
+    ownerScope: "all-owners",
+    range,
+    previewRole: null,
+  });
   const dashboardSummary = useOrgDashboardSummary({
-    enabled: !isDemo && !workspaceLoading,
+    enabled: !kpiV2 && !isDemo && !workspaceLoading,
     orgWideScope: orgWideDashboardScope,
   });
   const displayMetrics = React.useMemo(() => {
+    if (kpiV2 && dashboardKpis.payload?.workflow) {
+      return dashboardKpis.payload.workflow;
+    }
     const summary = dashboardSummary.summary;
     if (!dashboardSummary.enabled) return metrics;
     if (!orgWideDashboardScope || !summary) {
@@ -351,6 +364,8 @@ function DashboardWallPageInner() {
       dashboardSummary.person,
     );
   }, [
+    kpiV2,
+    dashboardKpis.payload,
     metrics,
     dashboardSummary.enabled,
     dashboardSummary.summary,

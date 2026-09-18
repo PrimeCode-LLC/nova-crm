@@ -10,6 +10,7 @@ import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skelet
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { filterArchivedLeads, filterActiveLeads } from "@/lib/leads/lead-archive";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 import { toast } from "sonner";
 import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
 import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
@@ -24,7 +25,7 @@ const LeadsTable = dynamic(
 
 export default function ArchivePage() {
   const {
-    leads,
+    leads: wsLeads,
     isDemo,
     workspaceLoading,
     archiveLead,
@@ -32,6 +33,17 @@ export default function ArchivePage() {
     currentUserId,
     addOrgActivityEvent,
   } = useWorkspace();
+  const crmPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: !isDemo,
+    drain: true,
+    filters: { archivedOnly: true },
+  });
+  const leads = React.useMemo(() => {
+    if (crmPages.enabled) return crmPages.items as typeof wsLeads;
+    return wsLeads;
+  }, [crmPages.enabled, crmPages.items, wsLeads]);
+  const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
 
   const archived = React.useMemo(() => filterArchivedLeads(leads), [leads]);
   const lostActive = React.useMemo(
@@ -129,7 +141,7 @@ export default function ArchivePage() {
         }
       />
       <PageBody contained>
-        {workspaceLoading ? (
+        {listLoading ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && archived.length === 0 ? (
           <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed bg-muted/20 px-6 py-10 text-center">

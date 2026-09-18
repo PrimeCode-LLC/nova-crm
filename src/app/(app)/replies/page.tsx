@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import {
   DASHBOARD_TIME_RANGE_LABELS,
@@ -46,7 +47,17 @@ function leadHref(lead: Lead): string {
 function RepliesPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { leads, isDemo, workspaceLoading } = useWorkspace();
+  const { leads: wsLeads, isDemo, workspaceLoading } = useWorkspace();
+  const crmPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: !isDemo,
+    drain: true,
+  });
+  const leads = React.useMemo(() => {
+    if (crmPages.enabled) return crmPages.items as typeof wsLeads;
+    return wsLeads;
+  }, [crmPages.enabled, crmPages.items, wsLeads]);
+  const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const timeZone = useOrgTimezone();
 
   const range = parseDashboardTimeRangeKey(searchParams.get("range"), "30d");
@@ -111,7 +122,7 @@ function RepliesPageInner() {
         }
       />
       <PageBody contained>
-        {workspaceLoading ? (
+        {listLoading ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && replied.length === 0 && leads.length === 0 ? (
           <WorkspaceEmptyHint title="No replies yet" description="Inbound replies will show up here." />
