@@ -68,6 +68,9 @@ services:
         NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1: ${NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1:-true}
         # Empty keeps the snapshot on. Set to true only together with runtime WORKSPACE_CRM_SNAPSHOT_OFF=true.
         NEXT_PUBLIC_WORKSPACE_CRM_SNAPSHOT_OFF: ${NEXT_PUBLIC_WORKSPACE_CRM_SNAPSHOT_OFF:-}
+        # Empty keeps legacy 15s poll / client KPI path. Set true with runtime DASHBOARD_KPI_API_V2 / WORKSPACE_CRM_POLL_V2.
+        NEXT_PUBLIC_DASHBOARD_KPI_API_V2: ${NEXT_PUBLIC_DASHBOARD_KPI_API_V2:-}
+        NEXT_PUBLIC_WORKSPACE_CRM_POLL_V2: ${NEXT_PUBLIC_WORKSPACE_CRM_POLL_V2:-}
     restart: unless-stopped
     env_file:
       - .env.production
