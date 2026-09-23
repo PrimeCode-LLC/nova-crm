@@ -27,8 +27,14 @@ import {
 } from "@/lib/dashboard-summary-apply";
 import {
   canApplyOrgWideDashboardSummary,
+  collectWorkflowLinkLeadIds,
+  filterOptionalLeadRows,
+  filterRequiredLeadRows,
+  resolveDashboardKpiViewer,
+  resolveWorkflowLeadGate,
   scopeDashboardEntitiesForKpiViewer,
 } from "@/lib/dashboard-kpi-scope";
+import { seesAllLeadsInTenant } from "@/lib/workspace-hierarchy";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST, roleLabel } from "@/lib/constants";
 import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
@@ -83,7 +89,7 @@ import {
   getOwnerFilterTriggerLabel,
 } from "@/lib/owner-scope";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
-import type { ChannelKey, OrgMemberRole } from "@/lib/types";
+import type { ChannelKey, Lead, OrgMemberRole } from "@/lib/types";
 import {
   Target,
   Clock,
@@ -111,7 +117,9 @@ import {
 } from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
 import { useDashboardKpis } from "@/hooks/use-dashboard-kpis";
-import { isDashboardKpiApiV2Enabled } from "@/lib/dashboard-kpi-v2-flags";
+import { peekCrmEntity } from "@/lib/crm/entity-cache";
+import { useCachedLeadIds, useCrmEntityTotals, useRememberLeadsByIds } from "@/hooks/use-snapshot-crm";
+import { isDashboardKpiApiV2Enabled, isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import {
   Select,
   SelectContent,
@@ -173,6 +181,31 @@ export default function DashboardPage() {
     organizationTimezone,
     activeOrgMemberIds,
   } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const snapshotListsEmpty = snapshotOff && leads.length === 0;
+  const workflowLinkIds = React.useMemo(
+    () =>
+      snapshotListsEmpty
+        ? collectWorkflowLinkLeadIds({ followups, leadTasks, plans: followupPlans })
+        : [],
+    [snapshotListsEmpty, followups, leadTasks, followupPlans],
+  );
+  useRememberLeadsByIds(workflowLinkIds, snapshotListsEmpty);
+  const cachedWorkflowLeadIds = useCachedLeadIds(snapshotListsEmpty ? workflowLinkIds : []);
+  const workflowLinkLeads = React.useMemo(() => {
+    if (!snapshotListsEmpty || !cachedWorkflowLeadIds) return [] as Lead[];
+    const out: Lead[] = [];
+    for (const id of cachedWorkflowLeadIds.split(",")) {
+      if (!id) continue;
+      const row = peekCrmEntity("leads", id);
+      if (row) out.push(row);
+    }
+    return out;
+  }, [snapshotListsEmpty, cachedWorkflowLeadIds]);
+  const entityTotals = useCrmEntityTotals(snapshotOff);
+  const workspaceHasCrm = snapshotOff
+    ? (entityTotals.data?.leads ?? 0) + (entityTotals.data?.deals ?? 0) > 0
+    : leads.length > 0;
   const navAccess = useNavAccessContext();
   const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();
   const emailResponseCtx = useLeadEmailResponseContext();
@@ -206,6 +239,12 @@ export default function DashboardPage() {
    * Align KPI + list rows with hierarchy / preview role before channel·owner·range filters.
    * Org-wide viewers keep full workspace arrays; preview-as-salesperson narrows to own scope.
    */
+  const narrowCrmLists = React.useMemo(() => {
+    const kpiViewer = resolveDashboardKpiViewer(viewer, prefs.previewRole);
+    if (!kpiViewer) return false;
+    return !seesAllLeadsInTenant(kpiViewer);
+  }, [viewer, prefs.previewRole]);
+
   const kpiScoped = React.useMemo(
     () =>
       scopeDashboardEntitiesForKpiViewer({
@@ -216,8 +255,9 @@ export default function DashboardPage() {
         deals,
         followups,
         leadTasks,
+        snapshotCutoverActive: snapshotOff,
       }),
-    [viewer, prefs.previewRole, users, leads, deals, followups, leadTasks],
+    [viewer, prefs.previewRole, users, leads, deals, followups, leadTasks, snapshotOff],
   );
 
   const ownerScopeDeps = React.useMemo(
@@ -311,27 +351,59 @@ export default function DashboardPage() {
     [activityRecordsAfterChannel, ownerScope, ownerScopeDeps, timeRange, organizationTimezone],
   );
 
-  const workflowFollowups = React.useMemo(
+  const workflowLeadGate = React.useMemo(
     () =>
-      kpiScoped.followups.filter((followup) => !followup.leadId || scopedLeadIds.has(followup.leadId)),
-    [kpiScoped.followups, scopedLeadIds],
+      resolveWorkflowLeadGate({
+        snapshotLeadsEmpty: snapshotListsEmpty,
+        scopedLeadIds,
+        followups: snapshotListsEmpty ? followups : kpiScoped.followups,
+        leadTasks: snapshotListsEmpty ? leadTasks : kpiScoped.leadTasks,
+        linkLeads: workflowLinkLeads,
+        viewer,
+        previewRole: prefs.previewRole,
+        orgUsers: users,
+        channelScope,
+        ownerScope,
+        ownerScopeDeps,
+        timeRange: timeRange as DashboardTimeRangeKey,
+        timeZone: organizationTimezone,
+      }),
+    [
+      snapshotListsEmpty,
+      scopedLeadIds,
+      followups,
+      leadTasks,
+      kpiScoped.followups,
+      kpiScoped.leadTasks,
+      workflowLinkLeads,
+      viewer,
+      prefs.previewRole,
+      users,
+      channelScope,
+      ownerScope,
+      ownerScopeDeps,
+      timeRange,
+      organizationTimezone,
+    ],
+  );
+  const workflowFollowups = React.useMemo(
+    () => filterOptionalLeadRows(workflowLeadGate.followups, workflowLeadGate.gateLeadIds),
+    [workflowLeadGate],
   );
   const workflowPlans = React.useMemo(
-    () => followupPlans.filter((plan) => scopedLeadIds.has(plan.leadId)),
-    [followupPlans, scopedLeadIds],
+    () => filterRequiredLeadRows(followupPlans, workflowLeadGate.gateLeadIds),
+    [followupPlans, workflowLeadGate],
   );
   const workflowTasks = React.useMemo(
-    () => kpiScoped.leadTasks.filter((task) => !task.leadId || scopedLeadIds.has(task.leadId)),
-    [kpiScoped.leadTasks, scopedLeadIds],
+    () => filterOptionalLeadRows(workflowLeadGate.leadTasks, workflowLeadGate.gateLeadIds),
+    [workflowLeadGate],
   );
   const composeSentAts = React.useMemo(
     () =>
       composeEmailSentAtsFromTimeline(
-        flattenTimelineByLead(timelineByLead).filter(
-          (event) => !event.leadId || scopedLeadIds.has(event.leadId),
-        ),
+        filterOptionalLeadRows(flattenTimelineByLead(timelineByLead), workflowLeadGate.gateLeadIds),
       ),
-    [timelineByLead, scopedLeadIds],
+    [timelineByLead, workflowLeadGate],
   );
   const kpiV2 = isDashboardKpiApiV2Enabled();
   // When KPI API V2 is on, display gauges come from the server — do not aggregate
@@ -395,6 +467,7 @@ export default function DashboardPage() {
   const dashboardSummary = useOrgDashboardSummary({
     enabled: !kpiV2 && !isDemo && !workspaceLoading,
     orgWideScope: orgWideDashboardScope,
+    previewRole: prefs.previewRole,
   });
   const displayMetrics = React.useMemo(() => {
     if (kpiV2 && dashboardKpis.payload?.workflow) {
@@ -854,7 +927,7 @@ export default function DashboardPage() {
                 size="sm"
                 type="button"
                 onClick={exportOverviewCsv}
-                disabled={!isDemo && leads.length === 0}
+                disabled={!isDemo && !workspaceHasCrm}
               >
                 <Download className="h-3.5 w-3.5 mr-1.5" /> Export
               </Button>
@@ -915,9 +988,9 @@ export default function DashboardPage() {
       </Dialog>
 
       <PageBody>
-        {workspaceLoading ? (
+        {workspaceLoading || (snapshotOff && entityTotals.isLoading) ? (
           <WorkspacePageSkeleton />
-        ) : !isDemo && leads.length === 0 && !contentLayout ? (
+        ) : !isDemo && !workspaceHasCrm && !contentLayout ? (
           <div className="py-8">
             <WorkspaceEmptyHint
               title="Your workspace is empty"
@@ -1028,6 +1101,7 @@ export default function DashboardPage() {
                 widgets={opsWidgets}
                 isDemo={isDemo}
                 orgWideScope={orgWideDashboardScope}
+                narrowLists={narrowCrmLists}
                 extraSentAts={composeSentAts}
               />
             ) : frontlineLayout ? (
@@ -1047,6 +1121,7 @@ export default function DashboardPage() {
                 wonDealCount={wonDealCount}
                 avgResponseMin={avgResponseMin}
                 isDemo={isDemo}
+                narrowLists={narrowCrmLists}
               />
             ) : w.classicKpis ? (
               <>
@@ -1217,6 +1292,7 @@ export default function DashboardPage() {
                 tasks={workflowTasks}
                 currentUserId={currentUserId}
                 contentScope="mine"
+                narrow={narrowCrmLists}
               />
             ) : null}
             {!frontlineLayout && w.aiBrief ? (

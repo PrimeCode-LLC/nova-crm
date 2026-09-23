@@ -14,15 +14,15 @@ import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Followup, LeadTask, Role } from "@/lib/types";
 import { showTeamFollowupsOnDashboard } from "@/lib/dashboard-role-focus";
+import { isFollowupDueThroughToday, isFollowupOverdue } from "@/lib/followup-open-status";
 
-function followupDueBucket(dueAt: string): "overdue" | "today" | "soon" | "later" {
-  const d = new Date(dueAt).getTime();
-  const now = Date.now();
-  const diff = d - now;
-  const day = 86_400_000;
-  if (diff < 0) return "overdue";
-  if (diff < day) return "today";
-  if (diff < day * 7) return "soon";
+/** Calendar-day buckets, aligned with Follow-ups / Needs Attention. */
+function followupDueBucket(followup: Followup): "overdue" | "today" | "soon" | "later" {
+  if (isFollowupOverdue(followup)) return "overdue";
+  if (isFollowupDueThroughToday(followup)) return "today";
+  const due = new Date(followup.dueAt).getTime();
+  if (Number.isNaN(due)) return "later";
+  if (due < Date.now() + 86_400_000 * 7) return "soon";
   return "later";
 }
 
@@ -228,7 +228,7 @@ function FollowupRow({
   onToggle: (id: string, completed: boolean) => void;
   canToggle: boolean;
 }) {
-  const bucket = followupDueBucket(f.dueAt);
+  const bucket = followupDueBucket(f);
   const href = followupHref(f);
   const pr = PRIORITY_TONE[f.priority];
 

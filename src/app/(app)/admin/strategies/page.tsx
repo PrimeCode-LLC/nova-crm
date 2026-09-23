@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { findStrategyDayProgress, useStrategyDayProgress } from "@/hooks/use-snapshot-crm";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import {
   newProspectingEntityId,
   useProspectingStrategyData,
@@ -44,6 +46,8 @@ const STATUS_TONE: Record<ProspectingStrategy["status"], string> = {
 export default function AdminStrategiesPage() {
   const router = useRouter();
   const ws = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
+  const progressLeads = snapshotOff ? [] : ws.leads;
   const data = useProspectingStrategyData();
   const [seeding, setSeeding] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
@@ -167,6 +171,21 @@ export default function AdminStrategiesPage() {
     }
   };
 
+  const progressSubjects = React.useMemo(() => {
+    const userIds = [...new Set(data.assignments.map((assignment) => assignment.userId))];
+    return userIds.map((userId) => ({
+      userId,
+      strategyAssignmentIds: activeAssignmentsForUser(data.assignments, userId).map(
+        (assignment) => assignment.id,
+      ),
+    }));
+  }, [data.assignments]);
+  const remoteDay = useStrategyDayProgress(
+    snapshotOff,
+    progressSubjects,
+    ws.intentPlaybook.outreachThreshold,
+  );
+
   const managerRows = React.useMemo(() => {
     const userIds = [...new Set(data.assignments.map((a) => a.userId))];
     return userIds.map((userId) => {
@@ -178,12 +197,21 @@ export default function AdminStrategiesPage() {
         const s = data.strategies.find((x) => x.id === a.strategyId);
         return sum + allocatedDailyTarget(a, s?.dailyTargetDefault);
       }, 0);
-      const progress = countStrategyDayProgress({
-        leads: ws.leads,
-        userId,
-        strategyAssignmentIds: active.map((assignment) => assignment.id),
-        outreachThreshold: ws.intentPlaybook.outreachThreshold,
-      });
+      const assignmentIds = active.map((assignment) => assignment.id);
+      const progress = snapshotOff
+        ? (findStrategyDayProgress(remoteDay.data?.results, userId, assignmentIds) ??
+          countStrategyDayProgress({
+            leads: [],
+            userId,
+            strategyAssignmentIds: assignmentIds,
+            outreachThreshold: ws.intentPlaybook.outreachThreshold,
+          }))
+        : countStrategyDayProgress({
+            leads: progressLeads,
+            userId,
+            strategyAssignmentIds: assignmentIds,
+            outreachThreshold: ws.intentPlaybook.outreachThreshold,
+          });
       const alloc = allocationTotal(active);
       return {
         userId,
@@ -194,7 +222,14 @@ export default function AdminStrategiesPage() {
         assignmentCount: active.length,
       };
     });
-  }, [data.assignments, data.strategies, ws.leads, ws.intentPlaybook.outreachThreshold]);
+  }, [
+    data.assignments,
+    data.strategies,
+    progressLeads,
+    remoteDay.data,
+    snapshotOff,
+    ws.intentPlaybook.outreachThreshold,
+  ]);
 
   return (
     <>

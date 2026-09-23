@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { resolveCrmListNarrowToMember } from "@/lib/db/crm-list-scope";
+import { resolveCrmListNarrowForSession } from "@/lib/db/crm-list-scope";
 import { countCrmEntitiesInPostgres } from "@/lib/db/list-crm-postgres";
+import { countLeadsGroupedInPostgres } from "@/lib/db/list-leads-postgres";
 import { isPostgresReadCrmV1Enabled } from "@/lib/db/postgres-read-crm-flags";
 import { isPostgresReadLeadsV1Enabled } from "@/lib/db/postgres-read-leads-flags";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
@@ -31,12 +32,15 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const narrowToMember = resolveCrmListNarrowToMember(
+  const narrowToMember = await resolveCrmListNarrowForSession(
     guard.ctx.role,
     url.searchParams.get("narrow"),
+    guard.ctx.session.uid,
   );
   const organizationId = guard.ctx.session.organizationId;
   const viewerUid = guard.ctx.session.uid;
+  const byOwner = url.searchParams.get("byOwner") === "1";
+  const byStage = url.searchParams.get("byStage") === "1";
 
   try {
     const counts = await countCrmEntitiesInPostgres({
@@ -44,11 +48,32 @@ export async function GET(req: Request) {
       narrowToMember,
       viewerUid,
     });
+    const grouped = leadsEnabled
+      ? {
+          ...(byOwner
+            ? {
+                byOwner: await countLeadsGroupedInPostgres(
+                  { organizationId, narrowToMember, viewerUid },
+                  "ownerId",
+                ),
+              }
+            : {}),
+          ...(byStage
+            ? {
+                byStage: await countLeadsGroupedInPostgres(
+                  { organizationId, narrowToMember, viewerUid },
+                  "stage",
+                ),
+              }
+            : {}),
+        }
+      : {};
     return NextResponse.json({
       ok: true,
       enabled: true,
       counts,
       narrow: narrowToMember,
+      ...grouped,
     });
   } catch (err) {
     console.error("[org/crm-counts] failed", organizationId, err);

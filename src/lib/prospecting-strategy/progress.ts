@@ -78,8 +78,13 @@ export function countStrategyDayProgress(opts: {
   strategyAssignmentIds?: readonly string[];
   outreachThreshold?: number;
   now?: Date;
+  /** Inclusive start of the org-local day. Pair with `dayEnd` so the server TZ is not used. */
+  dayStart?: Date;
+  /** Exclusive end of the org-local day. */
+  dayEnd?: Date;
 }): StrategyDayProgress {
-  const dayStart = startOfLocalDay(opts.now ?? new Date());
+  const dayStart = opts.dayStart ?? startOfLocalDay(opts.now ?? new Date());
+  const dayEnd = opts.dayEnd;
   const threshold = opts.outreachThreshold ?? 45;
   let researched = 0;
   let completed = 0;
@@ -112,7 +117,14 @@ export function countStrategyDayProgress(opts: {
     }
     const actor = lead.scraperId || lead.createdById || lead.prospectOwnerId || lead.ownerId;
     if (actor !== opts.userId) continue;
-    if (!isSameLocalDay(lead.createdAt, dayStart)) continue;
+    if (dayEnd) {
+      const created = Date.parse(lead.createdAt ?? "");
+      if (!Number.isFinite(created) || created < dayStart.getTime() || created >= dayEnd.getTime()) {
+        continue;
+      }
+    } else if (!isSameLocalDay(lead.createdAt, dayStart)) {
+      continue;
+    }
 
     researched += 1;
 

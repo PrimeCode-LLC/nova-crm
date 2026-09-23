@@ -257,6 +257,43 @@ export async function countLeadsInPostgres(
   return withOrganizationScope(organizationId, (tx) => tx.lead.count({ where }));
 }
 
+/** Grouped lead counts. Same scope/filters as the list; empty object when unconfigured. */
+export async function countLeadsGroupedInPostgres(
+  options: Omit<ListLeadsPostgresOptions, "cursor" | "limit">,
+  by: "ownerId" | "stage",
+): Promise<Record<string, number>> {
+  if (!isDatabaseConfigured()) return {};
+  const organizationId = options.organizationId.trim();
+  if (!organizationId) return {};
+
+  const narrow =
+    Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+  const filterClause = leadListFilterWhere(options.filters);
+  const scopeParts: Prisma.LeadWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [memberLeadScopeWhere(options.viewerUid!)] : []),
+  ];
+  const where: Prisma.LeadWhereInput = {
+    organizationId,
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
+  };
+
+  const rows = await withOrganizationScope(organizationId, (tx) =>
+    tx.lead.groupBy({
+      by: [by],
+      where,
+      _count: { _all: true },
+    }),
+  );
+  const out: Record<string, number> = {};
+  for (const row of rows) {
+    const key = row[by];
+    if (!key) continue;
+    out[key] = row._count._all;
+  }
+  return out;
+}
+
 /**
  * Assemble a full org leads snapshot by walking cursor pages (short transactions).
  * Caps at {@link LEADS_LIST_MAX_PAGES} × page size.
@@ -280,6 +317,7 @@ export async function listLeadsFromPostgres(
       organizationId: options.organizationId,
       narrowToMember: options.narrowToMember,
       viewerUid: options.viewerUid,
+      filters: options.filters,
       limit: pageSize,
       cursor,
     });

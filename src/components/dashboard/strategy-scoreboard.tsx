@@ -22,6 +22,10 @@ import { fmtCurrency, fmtNumber, fmtPercent, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { WallMetricTiles } from "@/components/dashboard/wall-metric-tiles";
 import { useOpsScoreboards } from "@/hooks/use-ops-scoreboards";
+import {
+  inMemoryLeadScanUnavailable,
+  SNAPSHOT_LEAD_SCAN_EMPTY_COPY,
+} from "@/lib/dashboard-kpi-v2-flags";
 import type { Deal, Followup, Lead } from "@/lib/types";
 
 export function StrategyScoreboard({
@@ -59,9 +63,21 @@ export function StrategyScoreboard({
     orgWideScopeProp ?? (!leadsOverride && !dealsOverride && !followupsOverride);
   const scoreboards = useOpsScoreboards({ range, orgWideScope });
 
+  const leadScanOff =
+    inMemoryLeadScanUnavailable(ws.isDemo, leads.length) &&
+    !(scoreboards.enabled && scoreboards.payload?.strategy);
+
   const board = React.useMemo(() => {
     if (scoreboards.enabled && scoreboards.payload?.strategy) {
       return scoreboards.payload.strategy;
+    }
+    if (leadScanOff) {
+      return {
+        rows: [],
+        attributionCoverage: 0,
+        prospectsInRange: 0,
+        attributedInRange: 0,
+      };
     }
     return buildStrategyScoreboardRows({
       strategies,
@@ -74,6 +90,7 @@ export function StrategyScoreboard({
       timeZone,
     });
   }, [
+    leadScanOff,
     scoreboards.enabled,
     scoreboards.payload,
     strategies,
@@ -148,6 +165,10 @@ export function StrategyScoreboard({
       >
         {loading ? (
           <p className="py-6 text-center text-xs text-muted-foreground">Loading strategies…</p>
+        ) : leadScanOff ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            {SNAPSHOT_LEAD_SCAN_EMPTY_COPY}
+          </p>
         ) : board.rows.length === 0 ? (
           <div className="space-y-2 py-6 text-center">
             <p className="text-xs text-muted-foreground">

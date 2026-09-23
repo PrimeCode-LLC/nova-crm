@@ -27,6 +27,9 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { useChannelOptions } from "@/hooks/use-channel-options";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { fetchCompanyProspectCountForMe } from "@/lib/prospects/fetch-company-prospect-count";
+import { fetchExactCompanyProspects } from "@/lib/prospects/fetch-company-prospects";
 import { countCompanyContactsForUser } from "@/lib/prospecting-strategy/progress";
 import {
   collapseAccidentalDoubleName,
@@ -271,7 +274,7 @@ function DraftAnnotation({
 function DraftForm({ draft }: { draft: ProspectDraft }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { profiles, leads, currentUserId, intentPlaybook } = useWorkspace();
+  const { profiles, leads, currentUserId, intentPlaybook, isDemo } = useWorkspace();
   const channelOptions = useChannelOptions();
   const prospecting = useProspectingStrategyData();
   const form = useForm<ProspectFormValues>({
@@ -439,6 +442,35 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
         );
         const selected = prospecting.strategies.find((item) => item.id === nextForm.strategyId);
         const max = resolveDailyTargets(selected).maxContactsPerCompany ?? 2;
+        const domain = domainFromWebsiteOrEmail(nextForm.website, nextForm.email);
+        const companyName = nextForm.bizName.trim();
+        let existingContactsForCompany = 0;
+        if (isLiveCrmSnapshotDisabled(isDemo) && (domain || companyName)) {
+          try {
+            existingContactsForCompany = await fetchCompanyProspectCountForMe(
+              domain ? { companyDomain: domain } : { companyName },
+            );
+          } catch {
+            const companyLeads = await fetchExactCompanyProspects(
+              domain
+                ? { intakeKind: "prospect", companyDomain: domain }
+                : { intakeKind: "prospect", companyNameExact: companyName },
+            );
+            existingContactsForCompany = countCompanyContactsForUser(
+              companyLeads,
+              currentUserId,
+              domain,
+              companyName,
+            );
+          }
+        } else {
+          existingContactsForCompany = countCompanyContactsForUser(
+            leads,
+            currentUserId,
+            domain,
+            companyName,
+          );
+        }
         const gate = evaluateQualifyGate({
           companyName: nextForm.bizName.trim(),
           companyWebsite: nextForm.website.trim(),
@@ -450,12 +482,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
           personalizationNote: nextForm.qualifyForm.personalization,
           primaryOpportunityLabel: nextForm.qualifyForm.primaryOpportunityLabel,
           outreachThreshold: intentPlaybook.outreachThreshold,
-          existingContactsForCompany: countCompanyContactsForUser(
-            leads,
-            currentUserId,
-            domainFromWebsiteOrEmail(nextForm.website, nextForm.email),
-            nextForm.bizName,
-          ),
+          existingContactsForCompany,
           maxContactsPerCompany: max,
         });
         const blocking = gate.issues.filter((issue) => issue.blocking);

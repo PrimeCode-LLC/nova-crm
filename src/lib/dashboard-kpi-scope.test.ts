@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   canApplyOrgWideDashboardSummary,
+  collectWorkflowLinkLeadIds,
+  filterOptionalLeadRows,
+  filterRequiredLeadRows,
   resolveDashboardKpiAccessScope,
   resolveDashboardKpiViewer,
+  resolveWorkflowLeadGate,
   scopeDashboardEntitiesForKpiViewer,
+  WORKFLOW_LINK_LEAD_CAP,
 } from "@/lib/dashboard-kpi-scope";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import { computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
-import type { Deal, Lead, User } from "@/lib/types";
+import type { OwnerScopeDeps } from "@/lib/owner-scope";
+import type { Deal, Followup, Lead, User } from "@/lib/types";
 
 const NOW = "2026-09-09T00:00:00.000Z";
 
@@ -287,5 +293,157 @@ describe("dashboard KPI scoped aggregation", () => {
       leadTasks: [],
     });
     expect(scoped.leads.map((l) => l.id)).toEqual(["p1"]);
+  });
+});
+
+function followup(id: string, ownerId: string, leadId?: string): Followup {
+  return {
+    id,
+    leadId,
+    title: id,
+    dueAt: NOW,
+    ownerId,
+    priority: "medium",
+    auto: false,
+  };
+}
+
+function ownerDeps(currentUserId: string, users: readonly User[]): OwnerScopeDeps {
+  return {
+    currentUserId,
+    users,
+    getUserById: (id) => users.find((row) => row.id === id),
+    getOwnerDisplayName: (id) => users.find((row) => row.id === id)?.displayName,
+  };
+}
+
+describe("workflow lead gate when the CRM snapshot is empty", () => {
+  const director = user("dir", { roleId: "director", orgRole: "owner" });
+  const rep = user("rep", { roleId: "salesperson", orgRole: "member" });
+  const roster = [director, rep];
+  const ownLead = lead("own", director.id);
+  const otherLead = lead("other", rep.id, { channel: "linkedin_outbound" });
+  const deps = ownerDeps(director.id, roster);
+
+  it("snapshot-on keeps the full filtered lead set and ignores link leads", () => {
+    const scopedLeadIds = new Set(["own"]);
+    const gate = resolveWorkflowLeadGate({
+      snapshotLeadsEmpty: false,
+      scopedLeadIds,
+      followups: [followup("f-other", rep.id, "other")],
+      leadTasks: [],
+      linkLeads: [ownLead, otherLead],
+      viewer: director,
+      orgUsers: roster,
+      channelScope: [],
+      ownerScope: "all-owners",
+      ownerScopeDeps: deps,
+      timeRange: "30d",
+      now: new Date(NOW),
+    });
+    expect(gate.gateLeadIds).toBe(scopedLeadIds);
+    expect([...gate.gateLeadIds]).toEqual(["own"]);
+    expect(gate.followups.map((row) => row.id)).toEqual(["f-other"]);
+  });
+
+  it("empty snapshot leads still gate rows once link leads are supplied", () => {
+    const rows = [
+      followup("f-own", director.id, "own"),
+      followup("f-other", rep.id, "other"),
+      followup("f-loose", director.id),
+    ];
+    const gate = resolveWorkflowLeadGate({
+      snapshotLeadsEmpty: true,
+      scopedLeadIds: new Set(),
+      followups: rows,
+      leadTasks: [],
+      linkLeads: [ownLead, otherLead],
+      viewer: director,
+      orgUsers: roster,
+      channelScope: [],
+      ownerScope: "all-owners",
+      ownerScopeDeps: deps,
+      timeRange: "30d",
+      now: new Date(NOW),
+    });
+    expect([...gate.gateLeadIds].sort()).toEqual(["other", "own"]);
+    const visible = filterOptionalLeadRows(gate.followups, gate.gateLeadIds);
+    expect(visible.map((row) => row.id).sort()).toEqual(["f-loose", "f-other", "f-own"]);
+  });
+
+  it("preview-as-salesperson keeps only that viewer's lead follow-up, plus unlinked rows", () => {
+    const rows = [
+      followup("f-own", director.id, "own"),
+      followup("f-other", rep.id, "other"),
+      followup("f-loose", director.id),
+    ];
+    const gate = resolveWorkflowLeadGate({
+      snapshotLeadsEmpty: true,
+      scopedLeadIds: new Set(),
+      followups: rows,
+      leadTasks: [],
+      linkLeads: [ownLead, otherLead],
+      viewer: director,
+      previewRole: "salesperson",
+      orgUsers: roster,
+      channelScope: [],
+      ownerScope: "all-owners",
+      ownerScopeDeps: deps,
+      timeRange: "30d",
+      now: new Date(NOW),
+    });
+    expect([...gate.gateLeadIds]).toEqual(["own"]);
+    const visible = filterOptionalLeadRows(gate.followups, gate.gateLeadIds);
+    expect(visible.map((row) => row.id).sort()).toEqual(["f-loose", "f-own"]);
+    expect(filterRequiredLeadRows([{ leadId: "own" }, { leadId: "other" }, { leadId: "" }], gate.gateLeadIds)).toEqual([
+      { leadId: "own" },
+    ]);
+  });
+
+  it("keeps lead-linked follow-ups when the snapshot cutover has an empty lead list", () => {
+    const sales = user("sales");
+    const scoped = scopeDashboardEntitiesForKpiViewer({
+      viewer: sales,
+      orgUsers: [sales],
+      leads: [],
+      deals: [],
+      followups: [followup("fu-1", sales.id, "lead-missing")],
+      leadTasks: [],
+      snapshotCutoverActive: true,
+    });
+    expect(scoped.followups.map((row) => row.id)).toEqual(["fu-1"]);
+  });
+
+  it("channel filter drops link leads outside the selected channel", () => {
+    const gate = resolveWorkflowLeadGate({
+      snapshotLeadsEmpty: true,
+      scopedLeadIds: new Set(),
+      followups: [],
+      leadTasks: [],
+      linkLeads: [ownLead, otherLead],
+      viewer: director,
+      orgUsers: roster,
+      channelScope: ["cold_email"],
+      ownerScope: "all-owners",
+      ownerScopeDeps: deps,
+      timeRange: "all",
+      now: new Date(NOW),
+    });
+    expect([...gate.gateLeadIds]).toEqual(["own"]);
+  });
+
+  it("caps and dedupes workflow link lead ids", () => {
+    const followups = Array.from({ length: WORKFLOW_LINK_LEAD_CAP + 5 }, (_, index) => ({
+      leadId: index === 1 ? "lead-0" : `lead-${index}`,
+    }));
+    const ids = collectWorkflowLinkLeadIds({
+      followups,
+      leadTasks: [{ leadId: "task-extra" }],
+      plans: [{ leadId: "  plan-extra  " }],
+    });
+    expect(ids).toHaveLength(WORKFLOW_LINK_LEAD_CAP);
+    expect(ids.filter((id) => id === "lead-0")).toHaveLength(1);
+    expect(ids).not.toContain("task-extra");
+    expect(ids).not.toContain("plan-extra");
   });
 });

@@ -133,7 +133,15 @@ import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activi
 import { fetchLeadByIdClient } from "@/lib/leads/fetch-lead-by-id-client";
 import { fetchLeadOwnerIdClient } from "@/lib/leads/fetch-lead-owner-id-client";
 import { useInvalidateDashboardKpis } from "@/hooks/use-dashboard-kpis";
-import { isDashboardKpiApiV2Enabled } from "@/lib/dashboard-kpi-v2-flags";
+import {
+  isDashboardKpiApiV2Enabled,
+  isLiveCrmSnapshotDisabled,
+  isWorkspaceCrmSnapshotOff,
+} from "@/lib/dashboard-kpi-v2-flags";
+import { peekCrmEntity, rememberCrmEntities, subscribeCrmEntityCache } from "@/lib/crm/entity-cache";
+import { withCachedSessionTargets } from "@/lib/crm/session-snapshot-seed";
+import { fetchAccountByIdClient } from "@/lib/crm/fetch-crm-entity-by-id-client";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   buildArchivePatch,
   buildRestoreAsProspectPatch,
@@ -363,6 +371,24 @@ function newLocalId(prefix: string) {
   return `${prefix}-${Date.now()}`;
 }
 
+async function leadRowForMutation(
+  leadId: string,
+  organizationId: string | undefined,
+  snapLeads: readonly Lead[],
+): Promise<Lead | undefined> {
+  const fromSnap = snapLeads.find((lead) => lead.id === leadId);
+  if (fromSnap) return fromSnap;
+  const cached = peekCrmEntity("leads", leadId);
+  if (cached) return cached;
+  if (!isWorkspaceCrmSnapshotOff() || !organizationId) return undefined;
+  const fetched = await fetchLeadByIdClient({ leadId, organizationId });
+  if (fetched.status !== "ok") return undefined;
+  rememberCrmEntities("leads", [fetched.lead]);
+  if (fetched.account) rememberCrmEntities("accounts", [fetched.account]);
+  if (fetched.contact) rememberCrmEntities("contacts", [fetched.contact]);
+  return fetched.lead;
+}
+
 export function WorkspaceModeProvider({
   initialMode,
   initialDemoPersonaId,
@@ -382,6 +408,9 @@ export function WorkspaceModeProvider({
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "/";
+  const queryClient = useQueryClient();
+  const [crmCacheEpoch, setCrmCacheEpoch] = React.useState(0);
+  React.useEffect(() => subscribeCrmEntityCache(() => setCrmCacheEpoch((n) => n + 1)), []);
   const invalidateDashboardKpis = useInvalidateDashboardKpis();
   const bumpDashboardKpis = React.useCallback(() => {
     if (isDashboardKpiApiV2Enabled()) invalidateDashboardKpis();
@@ -661,6 +690,8 @@ export function WorkspaceModeProvider({
     if (!id) return "";
     const fromLive = liveLeadsForPersistRef.current.find((l) => l.id === id)?.ownerId?.trim();
     if (fromLive) return fromLive;
+    const fromCache = peekCrmEntity("leads", id)?.ownerId?.trim();
+    if (fromCache) return fromCache;
     const fromSnapshot = snapshotRef.current.leads.find((l) => l.id === id)?.ownerId?.trim();
     if (fromSnapshot) return fromSnapshot;
     if (leadOwnerCacheRef.current.has(id)) {
@@ -1047,25 +1078,32 @@ export function WorkspaceModeProvider({
   const stageCrmEntities = React.useCallback(
     (payload: { leads?: Lead[]; accounts?: Account[]; contacts?: Contact[] }) => {
       if (payload.accounts?.length) {
+        rememberCrmEntities("accounts", payload.accounts);
         setAccountsAdded((prev) => {
           const ids = new Set(prev.map((a) => a.id));
           return [...prev, ...payload.accounts!.filter((a) => !ids.has(a.id))];
         });
       }
       if (payload.contacts?.length) {
+        rememberCrmEntities("contacts", payload.contacts);
         setContactsAdded((prev) => {
           const ids = new Set(prev.map((c) => c.id));
           return [...prev, ...payload.contacts!.filter((c) => !ids.has(c.id))];
         });
       }
       if (payload.leads?.length) {
+        rememberCrmEntities("leads", payload.leads);
         setLeadsAdded((prev) => {
           const ids = new Set(prev.map((l) => l.id));
           return [...prev, ...payload.leads!.filter((l) => !ids.has(l.id))];
         });
       }
+      if (isWorkspaceCrmSnapshotOff()) {
+        void queryClient.invalidateQueries({ queryKey: ["org", "crm-pages"] });
+        void queryClient.invalidateQueries({ queryKey: ["org", "kanban-stage"] });
+      }
     },
-    [],
+    [queryClient],
   );
 
   const patchUser = React.useCallback((userId: string, patch: Partial<Omit<User, "id">>) => {
@@ -2085,7 +2123,20 @@ export function WorkspaceModeProvider({
         snapshotRef.current.users.find((u) => u.id === snapshotRef.current.currentUserId)?.orgRole ??
         userDoc?.orgRole ??
         "member";
-      const lead = snapshotRef.current.leads.find((l) => l.id === leadId);
+      const leadFromSnap = snapshotRef.current.leads.find((l) => l.id === leadId);
+      let lead = leadFromSnap ?? peekCrmEntity("leads", leadId);
+      if (!lead && isWorkspaceCrmSnapshotOff() && userDoc?.organizationId) {
+        const fetched = await fetchLeadByIdClient({
+          leadId,
+          organizationId: userDoc.organizationId,
+        });
+        if (fetched.status === "ok") {
+          lead = fetched.lead;
+          rememberCrmEntities("leads", [fetched.lead]);
+          if (fetched.account) rememberCrmEntities("accounts", [fetched.account]);
+          if (fetched.contact) rememberCrmEntities("contacts", [fetched.contact]);
+        }
+      }
       if (lead && !canEditProspectDerivedLead(lead, viewerRole)) {
         throw new Error("Only workspace admins can edit this lead.");
       }
@@ -2483,9 +2534,28 @@ export function WorkspaceModeProvider({
         }
         return false;
       }
-      const lead = snap.leads.find((l) => l.id === leadId);
+      let lead = snap.leads.find((l) => l.id === leadId) ?? peekCrmEntity("leads", leadId);
+      if (!lead && isWorkspaceCrmSnapshotOff() && userDoc?.organizationId) {
+        const fetched = await fetchLeadByIdClient({
+          leadId,
+          organizationId: userDoc.organizationId,
+        });
+        if (fetched.status === "ok") {
+          lead = fetched.lead;
+          rememberCrmEntities("leads", [fetched.lead]);
+          if (fetched.account) rememberCrmEntities("accounts", [fetched.account]);
+        }
+      }
       if (!lead) return false;
-      const account = snap.accounts.find((a) => a.id === lead.accountId);
+      let account =
+        snap.accounts.find((a) => a.id === lead.accountId) ?? peekCrmEntity("accounts", lead.accountId);
+      if (!account && isWorkspaceCrmSnapshotOff() && lead.accountId) {
+        const fetchedAccount = await fetchAccountByIdClient(lead.accountId);
+        if (fetchedAccount.status === "ok") {
+          account = fetchedAccount.entity;
+          rememberCrmEntities("accounts", [fetchedAccount.entity]);
+        }
+      }
       if (!account) {
         if (!quiet) {
           toast.error("Could not delete lead: account not found.");
@@ -2576,7 +2646,7 @@ export function WorkspaceModeProvider({
       const snap = snapshotRef.current;
       const viewerRole: OrgMemberRole =
         snap.users.find((u) => u.id === snap.currentUserId)?.orgRole ?? userDoc?.orgRole ?? "member";
-      const lead = snap.leads.find((l) => l.id === leadId);
+      const lead = await leadRowForMutation(leadId, userDoc?.organizationId, snap.leads);
       if (!lead) return false;
       if (!canEditProspectDerivedLead(lead, viewerRole)) {
         if (!quiet) toast.error("Only workspace admins can archive this lead.");
@@ -2632,7 +2702,7 @@ export function WorkspaceModeProvider({
       const snap = snapshotRef.current;
       const viewerRole: OrgMemberRole =
         snap.users.find((u) => u.id === snap.currentUserId)?.orgRole ?? userDoc?.orgRole ?? "member";
-      const lead = snap.leads.find((l) => l.id === leadId);
+      const lead = await leadRowForMutation(leadId, userDoc?.organizationId, snap.leads);
       if (!lead) return false;
       if (!canEditProspectDerivedLead(lead, viewerRole)) {
         if (!quiet) toast.error("Only workspace admins can restore this lead.");
@@ -2683,7 +2753,8 @@ export function WorkspaceModeProvider({
       const snap = snapshotRef.current;
       const viewerRole: OrgMemberRole =
         snap.users.find((u) => u.id === snap.currentUserId)?.orgRole ?? userDoc?.orgRole ?? "member";
-      const lead = snap.leads.find((l) => l.id === leadId);
+      const lead =
+        snap.leads.find((l) => l.id === leadId) ?? peekCrmEntity("leads", leadId);
       if (lead && !canEditProspectDerivedLead(lead, viewerRole)) {
         toast.error("Only workspace admins can edit this lead.");
         return;
@@ -2852,7 +2923,9 @@ export function WorkspaceModeProvider({
           });
     const rosterHasViewer = roster.some((u) => u.id === uid);
     const fullRoster = rosterHasViewer ? roster : [...roster, viewer];
-    return applyLiveHierarchyScope(raw, viewer, fullRoster);
+    return applyLiveHierarchyScope(raw, viewer, fullRoster, {
+      snapshotCutoverActive: isWorkspaceCrmSnapshotOff(),
+    });
   }, [
     mode,
     demoSnapshot,
@@ -2987,13 +3060,17 @@ export function WorkspaceModeProvider({
   ]);
 
   const snapshot = React.useMemo((): WorkspaceSnapshot => {
-    const merged = mergeSessionIntoSnapshot(preSessionSnapshot, sessionV2);
+    const merged = mergeSessionIntoSnapshot(
+      withCachedSessionTargets(preSessionSnapshot, sessionV2),
+      sessionV2,
+      { keepUnloadedLeadLinks: isLiveCrmSnapshotDisabled(mode === "demo") },
+    );
     const planPatches = sessionV2.followupPlans.patches;
     const followupPlans = mergeFollowupPlans(merged.followupPlans ?? [], merged.followups).map(
       (p) => (planPatches[p.id] ? { ...p, ...planPatches[p.id] } : p),
     );
     return { ...preSessionSnapshot, ...merged, followupPlans };
-  }, [preSessionSnapshot, sessionV2]);
+  }, [preSessionSnapshot, sessionV2, mode]);
 
   snapshotRef.current = snapshot;
 
@@ -3062,6 +3139,11 @@ export function WorkspaceModeProvider({
   const value = React.useMemo<WorkspaceContextValue>(() => {
     const snapshotWithIdle = { ...snapshot, leads: enrichLeadsIdleState(snapshot.leads) };
     const lookup = createWorkspaceLookup(snapshotWithIdle);
+    const getLeadById = (id: string) => lookup.getLeadById(id) ?? peekCrmEntity("leads", id);
+    const getContactById = (id: string) =>
+      lookup.getContactById(id) ?? peekCrmEntity("contacts", id);
+    const getAccountById = (id: string) =>
+      lookup.getAccountById(id) ?? peekCrmEntity("accounts", id);
     const getOwnerDisplayName = (uid: string): string | undefined => {
       const id = uid?.trim();
       if (!id) return undefined;
@@ -3098,6 +3180,9 @@ export function WorkspaceModeProvider({
     return {
       ...snapshotWithIdle,
       ...lookup,
+      getLeadById,
+      getContactById,
+      getAccountById,
       mode,
       isDemo: mode === "demo",
       demoPersonaId,
@@ -3271,6 +3356,7 @@ export function WorkspaceModeProvider({
     bumpLeadActivity,
     requestWorkspaceGroups,
     requestedGroupsKey,
+    crmCacheEpoch,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

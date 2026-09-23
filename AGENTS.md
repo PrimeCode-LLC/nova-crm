@@ -19,3 +19,20 @@ Canonical contract (loaded every session). If a request conflicts with these rul
 
 @Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md
 <!-- END:nova-engineering-rules -->
+
+<!-- BEGIN:graphify -->
+# Graphify knowledge graph (always-on)
+
+This project has a knowledge graph at `graphify-out/` (god nodes, communities, cross-file edges). Cursor also loads `.cursor/rules/graphify.mdc` every session.
+
+**Before exploring with Grep/Glob/Read for architecture or “where is X” questions:**
+- Prefer `graphify query "<question>"`, `graphify path "<A>" "<B>"`, or `graphify explain "<concept>"`
+- Read `graphify-out/GRAPH_REPORT.md` for broad orientation; use `graphify-out/wiki/index.md` if present
+- Only skip the graph when `graphify-out/graph.json` does not exist yet, or when you already oriented and need exact line edits
+
+**Keep the graph fresh:**
+- After code changes: `npm run graphify:update` (or `python -m graphify update .`) — AST-only, no API cost
+- Full rebuild: `npm run graphify:build` (or `python -m graphify extract . --code-only`)
+- Watch mode: `npm run graphify:watch`
+- Git hooks (`post-commit` / `post-checkout`) rebuild after commits and branch switches
+<!-- END:graphify -->

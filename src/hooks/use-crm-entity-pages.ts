@@ -4,7 +4,9 @@ import * as React from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { mergeCrmListPagesById } from "@/lib/db/crm-list-keyset";
 import type { LeadListFilters } from "@/lib/db/crm-list-filters";
-import { isWorkspaceCrmPollV2Enabled } from "@/lib/dashboard-kpi-v2-flags";
+import { isWorkspaceCrmPollV2Enabled, isWorkspaceCrmSnapshotOff } from "@/lib/dashboard-kpi-v2-flags";
+import { rememberCrmEntities } from "@/lib/crm/entity-cache";
+import type { Account, Contact, Deal, Lead } from "@/lib/types";
 import { useSessionUserProfile } from "@/lib/hooks/use-session-user-profile";
 import { seesAllLeadsInTenant } from "@/lib/workspace-hierarchy";
 
@@ -13,6 +15,7 @@ type Entity = "leads" | "accounts" | "contacts" | "deals";
 export type CrmEntityPageFilters = LeadListFilters & {
   q?: string;
   ownerId?: string;
+  leadId?: string;
 };
 
 type PageJson = {
@@ -38,12 +41,22 @@ function appendLeadFilters(params: URLSearchParams, filters: CrmEntityPageFilter
   if (filters.activeOnly) params.set("activeOnly", "1");
   if (filters.archivedOnly) params.set("archivedOnly", "1");
   if (filters.isIdle) params.set("isIdle", "1");
+  if (filters.accountId?.trim()) params.set("accountId", filters.accountId.trim());
+  if (filters.contactId?.trim()) params.set("contactId", filters.contactId.trim());
+  if (filters.campaignId?.trim()) params.set("campaignId", filters.campaignId.trim());
+  if (filters.repliedSince?.trim()) params.set("repliedSince", filters.repliedSince.trim());
+  if (filters.createdSince?.trim()) params.set("createdSince", filters.createdSince.trim());
+  if (filters.ids?.length) params.set("ids", filters.ids.join(","));
 }
 
 function appendEntityFilters(params: URLSearchParams, filters: CrmEntityPageFilters | undefined) {
   if (!filters) return;
   if (filters.q?.trim()) params.set("q", filters.q.trim());
   if (filters.ownerId?.trim()) params.set("ownerId", filters.ownerId.trim());
+  if (filters.accountId?.trim()) params.set("accountId", filters.accountId.trim());
+  if (filters.contactId?.trim()) params.set("contactId", filters.contactId.trim());
+  if (filters.leadId?.trim()) params.set("leadId", filters.leadId.trim());
+  if (filters.ids?.length) params.set("ids", filters.ids.join(","));
 }
 
 /**
@@ -63,11 +76,11 @@ export function useCrmEntityPages(opts: {
   /** Auto-fetch remaining pages (deduped by id). Default false. */
   drain?: boolean;
 }) {
-  const flagOn = isWorkspaceCrmPollV2Enabled();
+  const flagOn = isWorkspaceCrmPollV2Enabled() || isWorkspaceCrmSnapshotOff();
   const enabled = Boolean(opts.enabled) && flagOn;
   const limit = opts.limit ?? 250;
   const filterKey = filtersQueryKey(opts.filters);
-  const drain = opts.drain ?? false;
+  const drain = isWorkspaceCrmSnapshotOff() ? false : (opts.drain ?? false);
 
   const viewer = useSessionUserProfile(enabled && opts.narrow === undefined);
   const narrow =
@@ -123,6 +136,14 @@ export function useCrmEntityPages(opts: {
     const pages = (query.data?.pages ?? []).map((p) => p.rows as { id: string }[]);
     return mergeCrmListPagesById(pages);
   }, [query.data]);
+
+  React.useEffect(() => {
+    if (!items.length) return;
+    if (opts.entity === "leads") rememberCrmEntities("leads", items as Lead[]);
+    else if (opts.entity === "accounts") rememberCrmEntities("accounts", items as Account[]);
+    else if (opts.entity === "contacts") rememberCrmEntities("contacts", items as Contact[]);
+    else rememberCrmEntities("deals", items as Deal[]);
+  }, [items, opts.entity]);
 
   const countsQuery = useQuery({
     queryKey: ["org", "crm-counts", narrow ? "1" : "0"],

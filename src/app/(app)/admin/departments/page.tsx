@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmLeadCountsByOwner } from "@/hooks/use-snapshot-crm";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { Users2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,7 +30,9 @@ function newTeamId() {
 
 export default function AdminTeamsPage() {
   const router = useRouter();
-  const { departments, users, leads, addDepartment } = useWorkspace();
+  const { departments, users, leads, addDepartment, isDemo } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const ownerCounts = useCrmLeadCountsByOwner(snapshotOff && !isDemo);
   const teams = departments;
   const [newOpen, setNewOpen] = React.useState(false);
   const [name, setName] = React.useState("");
@@ -62,9 +66,13 @@ export default function AdminTeamsPage() {
   const teamStats = teams.map((team) => ({
     ...team,
     memberCount: users.filter((u) => u.departmentId === team.id).length,
-    leadCount: leads.filter((l) =>
-      users.find((u) => u.id === l.ownerId)?.departmentId === team.id,
-    ).length,
+    leadCount: snapshotOff
+      ? users
+          .filter((u) => u.departmentId === team.id)
+          .reduce((sum, u) => sum + (ownerCounts.data?.[u.id] ?? 0), 0)
+      : leads.filter((l) =>
+          users.find((u) => u.id === l.ownerId)?.departmentId === team.id,
+        ).length,
   }));
 
   return (

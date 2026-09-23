@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 import { fmtRelative } from "@/lib/format";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import { StageBadge } from "@/components/common/stage-badge";
@@ -16,7 +18,14 @@ import { IDLE_LEAD_THRESHOLD_DAYS } from "@/lib/lead-idle";
 
 export function IdleLeads({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
   const ws = useWorkspace();
-  const leads = leadsOverride ?? ws.leads;
+  const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
+  const idlePages = useCrmEntityPages({
+    entity: "leads",
+    enabled: snapshotOff,
+    limit: 6,
+    filters: { isIdle: true, activeOnly: true, intakeKind: "sales_lead" },
+  });
+  const leads = snapshotOff ? (idlePages.items as Lead[]) : (leadsOverride ?? ws.leads);
   const idleLeads = React.useMemo(
     () =>
       [...leads]

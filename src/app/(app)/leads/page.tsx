@@ -22,6 +22,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { OWNER_SCOPE_PREFIX, ownerScopeFromQueryParam } from "@/lib/owner-scope";
 import { filterActiveLeads } from "@/lib/leads/lead-archive";
 import { useCrmEntityPages, type CrmEntityPageFilters } from "@/hooks/use-crm-entity-pages";
+import { CrmListLoadMore } from "@/components/common/crm-list-load-more";
 
 const LeadsTable = dynamic(
   () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
@@ -214,6 +215,10 @@ function LeadsPageInner() {
             initialOwnerScope={ownerScope}
           />
         )}
+        <CrmListLoadMore
+          hasMore={crmPages.hasNextPage}
+          onLoadMore={() => void crmPages.fetchNextPage()}
+        />
       </PageBody>
     </AppPage>
   );

@@ -13,6 +13,7 @@ export function DashboardNeedsAttentionWithContent({
   currentUserId,
   contentScope = "mine",
   wall,
+  narrow = false,
   className,
 }: {
   leads: readonly Lead[];
@@ -22,6 +23,7 @@ export function DashboardNeedsAttentionWithContent({
   currentUserId: string;
   contentScope?: "mine" | "team";
   wall?: boolean;
+  narrow?: boolean;
   className?: string;
 }) {
   const { items: contentItems } = useContentCalendarData();
@@ -35,6 +37,7 @@ export function DashboardNeedsAttentionWithContent({
       contentScope={contentScope}
       currentUserId={currentUserId}
       wall={wall}
+      narrow={narrow}
       className={className}
     />
   );

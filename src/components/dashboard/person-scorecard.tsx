@@ -15,6 +15,10 @@ import { fmtCurrency, fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
 import { useOpsScoreboards } from "@/hooks/use-ops-scoreboards";
+import {
+  inMemoryLeadScanUnavailable,
+  SNAPSHOT_LEAD_SCAN_EMPTY_COPY,
+} from "@/lib/dashboard-kpi-v2-flags";
 import type { Deal, Followup, Lead, LeadTask } from "@/lib/types";
 
 export function PersonScorecard({
@@ -54,10 +58,15 @@ export function PersonScorecard({
     (!leadsOverride && !dealsOverride && !followupsOverride && !tasksOverride);
   const scoreboards = useOpsScoreboards({ range, orgWideScope });
 
+  const leadScanOff =
+    inMemoryLeadScanUnavailable(ws.isDemo, leads.length) &&
+    !(scoreboards.enabled && (scoreboards.payload?.opsScorecard?.length ?? 0) > 0);
+
   const rowsAll = React.useMemo(() => {
     if (scoreboards.enabled && (scoreboards.payload?.opsScorecard?.length ?? 0) > 0) {
       return scoreboards.payload!.opsScorecard;
     }
+    if (leadScanOff) return [];
     return buildOpsScorecardRows({
       users,
       leads,
@@ -68,6 +77,7 @@ export function PersonScorecard({
       timeZone,
     });
   }, [
+    leadScanOff,
     scoreboards.enabled,
     scoreboards.payload,
     users,
@@ -95,7 +105,7 @@ export function PersonScorecard({
       <CardContent className="pt-0 overflow-x-auto">
         {rows.length === 0 ? (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            No scored activity in this range yet.
+            {leadScanOff ? SNAPSHOT_LEAD_SCAN_EMPTY_COPY : "No scored activity in this range yet."}
           </p>
         ) : (
           <Table>

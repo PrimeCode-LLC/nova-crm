@@ -2,14 +2,23 @@ import { NextResponse } from "next/server";
 import {
   deleteDocument,
   getDocument,
+  queryDocuments,
   setDocument,
   updateDocument,
+  type QueryFilter,
   type StoredDoc,
 } from "@/lib/db/document-shim/store";
 import { FIELD_DELETE, SERVER_TIMESTAMP } from "@/lib/db/document-shim/field-values";
 import { parsePath } from "@/lib/db/document-shim/path";
 import { projectWorkspaceListPayload } from "@/lib/db/document-shim/timestamp";
-import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import {
+  MEMBER_SCOPED_WORKSPACE_COLLECTIONS,
+  memberCanAccessWorkspaceDoc,
+  memberWorkspaceDocSlices,
+  workspaceDocSeesAll,
+} from "@/lib/db/workspace-document-member-scope";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { guardTenantApi, type TenantApiContext } from "@/lib/platform/tenant-api-guard";
 
 /**
  * Revive client FieldValue markers after JSON transport.
@@ -106,6 +115,69 @@ function forbidIfForeignDoc(
   return null;
 }
 
+function collectionRootOf(pathOrCollection: string): string {
+  return pathOrCollection.split("/")[0] ?? pathOrCollection;
+}
+
+async function viewerSeesAllWorkspaceDocs(ctx: TenantApiContext): Promise<boolean> {
+  if (workspaceDocSeesAll({ orgRole: ctx.role })) return true;
+  const userDoc = await getDocument(`${COLLECTIONS.users}/${ctx.session.uid}`);
+  const payload = userDoc?.payload ?? {};
+  return workspaceDocSeesAll({
+    orgRole: ctx.role,
+    roleId: typeof payload.roleId === "string" ? payload.roleId : null,
+    isSuperAdmin: payload.isSuperAdmin === true,
+  });
+}
+
+async function queryMemberScopedDocs(input: {
+  collectionRoot: string;
+  pathPrefix: string;
+  organizationId: string;
+  uid: string;
+  baseFilters: QueryFilter[];
+  orderBy?: { field: string; direction: "asc" | "desc" };
+  limit?: number;
+}): Promise<StoredDoc[]> {
+  const slices = memberWorkspaceDocSlices(input.collectionRoot, input.uid);
+  const batches = await Promise.all(
+    slices.map((slice) =>
+      queryDocuments({
+        collectionRoot: input.collectionRoot,
+        pathPrefix: input.pathPrefix,
+        organizationId: input.organizationId,
+        filters: [
+          ...input.baseFilters,
+          slice.kind === "eq"
+            ? { field: slice.field, op: "==" as const, value: slice.value }
+            : { field: slice.field, op: "array-contains" as const, value: slice.value },
+        ],
+        ...(input.orderBy ? { orderBy: input.orderBy } : {}),
+        ...(input.limit != null ? { limit: input.limit } : {}),
+      }),
+    ),
+  );
+  const byPath = new Map<string, StoredDoc>();
+  for (const batch of batches) {
+    for (const doc of batch) byPath.set(doc.path, doc);
+  }
+  return Array.from(byPath.values());
+}
+
+/** 403 when a non-oversight member reads or writes a peer row in a scoped collection. */
+async function forbidIfMemberCannotAccessDoc(
+  ctx: TenantApiContext,
+  collectionRoot: string,
+  payload: Record<string, unknown> | null,
+): Promise<NextResponse | null> {
+  if (!MEMBER_SCOPED_WORKSPACE_COLLECTIONS.has(collectionRoot)) return null;
+  if (await viewerSeesAllWorkspaceDocs(ctx)) return null;
+  if (!payload || !memberCanAccessWorkspaceDoc(collectionRoot, payload, ctx.session.uid)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return null;
+}
+
 export async function GET(req: Request) {
   const guard = await guardTenantApi();
   if (!guard.ok) return guard.response;
@@ -131,6 +203,12 @@ export async function GET(req: Request) {
       }
       const denied = forbidIfForeignDoc(existing, organizationId);
       if (denied) return denied;
+      const memberDenied = await forbidIfMemberCannotAccessDoc(
+        guard.ctx,
+        collectionRootOf(path),
+        existing.payload,
+      );
+      if (memberDenied) return memberDenied;
       return NextResponse.json({
         docs: [
           {
@@ -152,7 +230,7 @@ export async function GET(req: Request) {
 
     const orderByField = url.searchParams.get("orderBy")?.trim() || undefined;
     const orderDirRaw = url.searchParams.get("orderDir")?.trim().toLowerCase();
-    const orderDir =
+    const orderDir: "asc" | "desc" =
       orderDirRaw === "asc" || orderDirRaw === "desc" ? orderDirRaw : "desc";
     const limitRaw = url.searchParams.get("limit");
     const limitParsed = limitRaw != null ? Number(limitRaw) : undefined;
@@ -208,22 +286,37 @@ export async function GET(req: Request) {
           ]
         : [];
 
-    const { queryDocuments } = await import("@/lib/db/document-shim/store");
     const collectionRoot = collection.split("/")[0] ?? collection;
-    const docs = await queryDocuments({
-      collectionRoot,
-      pathPrefix: collection,
-      organizationId,
-      filters: [
-        { field: "organizationId", op: "==", value: organizationId },
-        ...equalityFilters,
-        ...arrayContainsFilters,
-      ],
-      ...(orderByField
+    const seesAll = await viewerSeesAllWorkspaceDocs(guard.ctx);
+    const memberScoped =
+      !seesAll && MEMBER_SCOPED_WORKSPACE_COLLECTIONS.has(collectionRoot);
+    const baseFilters: QueryFilter[] = [
+      { field: "organizationId", op: "==", value: organizationId },
+    ];
+    const order =
+      orderByField != null
         ? { orderBy: { field: orderByField, direction: orderDir } }
-        : {}),
-      ...(limit != null ? { limit } : {}),
-    });
+        : {};
+    const limitOpt = limit != null ? { limit } : {};
+
+    const docs = memberScoped
+      ? await queryMemberScopedDocs({
+          collectionRoot,
+          pathPrefix: collection,
+          organizationId,
+          uid: guard.ctx.session.uid,
+          baseFilters,
+          ...order,
+          ...limitOpt,
+        })
+      : await queryDocuments({
+          collectionRoot,
+          pathPrefix: collection,
+          organizationId,
+          filters: [...baseFilters, ...equalityFilters, ...arrayContainsFilters],
+          ...order,
+          ...limitOpt,
+        });
 
     const projected = docs.flatMap((d) => {
       try {
@@ -273,6 +366,12 @@ export async function PUT(req: Request) {
     const existing = await getDocument(body.path);
     const denied = forbidIfForeignDoc(existing, organizationId);
     if (denied) return denied;
+    const memberDenied = await forbidIfMemberCannotAccessDoc(
+      guard.ctx,
+      collectionRootOf(body.path),
+      existing?.payload ?? body.data,
+    );
+    if (memberDenied) return memberDenied;
 
     const data = {
       ...decodeClientFieldValues(body.data),
@@ -312,6 +411,12 @@ export async function PATCH(req: Request) {
     const existing = await getDocument(body.path);
     const denied = forbidIfForeignDoc(existing, organizationId);
     if (denied) return denied;
+    const memberDenied = await forbidIfMemberCannotAccessDoc(
+      guard.ctx,
+      collectionRootOf(body.path),
+      existing?.payload ?? null,
+    );
+    if (memberDenied) return memberDenied;
 
     await updateDocument(body.path, {
       ...decodeClientFieldValues(body.patch),
@@ -351,6 +456,12 @@ export async function DELETE(req: Request) {
     }
     const denied = forbidIfForeignDoc(existing, organizationId);
     if (denied) return denied;
+    const memberDenied = await forbidIfMemberCannotAccessDoc(
+      guard.ctx,
+      collectionRootOf(body.path),
+      existing.payload,
+    );
+    if (memberDenied) return memberDenied;
 
     await deleteDocument(body.path);
     return NextResponse.json({ ok: true });

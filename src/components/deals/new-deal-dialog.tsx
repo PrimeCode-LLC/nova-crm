@@ -29,6 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { rememberCrmEntities } from "@/lib/crm/entity-cache";
 import { createUserNotification, actorLabel } from "@/lib/notifications/create-user-notification";
 
 function defaultProbability(stage: PipelineStage): number {
@@ -130,28 +132,51 @@ export function NewDealDialog({
 }) {
   const router = useRouter();
   const ws = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
+  const [leadQuery, setLeadQuery] = React.useState("");
+  const [remoteLeads, setRemoteLeads] = React.useState<Lead[]>([]);
+  React.useEffect(() => {
+    if (!open || !snapshotOff) return;
+    const handle = window.setTimeout(() => {
+      const params = new URLSearchParams({ limit: "20", activeOnly: "1" });
+      if (leadQuery.trim()) params.set("q", leadQuery.trim());
+      void fetch(`/api/org/leads?${params.toString()}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      })
+        .then((res) => res.json())
+        .then((json: { leads?: Lead[] }) => {
+          const rows = Array.isArray(json.leads) ? json.leads : [];
+          rememberCrmEntities("leads", rows);
+          setRemoteLeads(rows);
+        })
+        .catch(() => setRemoteLeads([]));
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [open, snapshotOff, leadQuery]);
+  const pickerLeads = snapshotOff ? remoteLeads : leads;
   const ownerOptions = React.useMemo(
     () => buildOwnerOptions(users, currentUserId, getOwnerDisplayName),
     [users, currentUserId, getOwnerDisplayName],
   );
 
   const [form, setForm] = React.useState(() =>
-    initialFormState(leads, ownerOptions, currentUserId, leads[0]?.ownerId ?? ""),
+    initialFormState(pickerLeads, ownerOptions, currentUserId, pickerLeads[0]?.ownerId ?? ""),
   );
 
   React.useEffect(() => {
     if (!open) return;
     setForm((f) => {
-      if (leads.length === 0) return f;
-      if (leads.some((l) => l.id === f.leadId)) return f;
-      const first = leads[0]!;
+      if (pickerLeads.length === 0) return f;
+      if (pickerLeads.some((l) => l.id === f.leadId)) return f;
+      const first = pickerLeads[0]!;
       return {
         ...f,
         leadId: first.id,
         name: f.name.trim() ? f.name : `${first.companyName}: New opportunity`,
       };
     });
-  }, [open, leads]);
+  }, [open, pickerLeads]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -164,9 +189,9 @@ export function NewDealDialog({
     });
   }, [open, ownerOptions, currentUserId]);
 
-  const resolvedLeadId = leads.some((l) => l.id === form.leadId)
+  const resolvedLeadId = pickerLeads.some((l) => l.id === form.leadId)
     ? form.leadId
-    : (leads[0]?.id ?? "");
+    : (pickerLeads[0]?.id ?? "");
 
   function handleStageChange(next: PipelineStage) {
     setForm((f) => ({
@@ -178,7 +203,7 @@ export function NewDealDialog({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const leadForSubmit = leads.find((l) => l.id === resolvedLeadId);
+    const leadForSubmit = pickerLeads.find((l) => l.id === resolvedLeadId);
     if (!leadForSubmit) {
       toast.error("Add at least one lead before creating a deal.");
       return;
@@ -240,9 +265,9 @@ export function NewDealDialog({
     router.push(`/deals/${deal.id}`);
   }
 
-  const canSubmit = leads.length > 0 && Boolean(leads.find((l) => l.id === resolvedLeadId));
+  const canSubmit = pickerLeads.length > 0 && Boolean(pickerLeads.find((l) => l.id === resolvedLeadId));
 
-  const dealLeadTriggerLabel = leadPickerTriggerLabel(resolvedLeadId, leads);
+  const dealLeadTriggerLabel = leadPickerTriggerLabel(resolvedLeadId, pickerLeads);
   const resolvedOwnerId =
     ownerOptions.length === 0
       ? form.ownerId
@@ -259,15 +284,23 @@ export function NewDealDialog({
           <DialogHeader>
             <DialogTitle>New deal</DialogTitle>
             <DialogDescription>
-              {leads.length === 0
-                ? "Add leads to your workspace first so each deal can link to a company and contact."
+              {pickerLeads.length === 0
+                ? "Search for a lead to link this deal."
                 : "Creates a deal for this browser session until your workspace is connected to live data."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-2">
             <div className="grid gap-1.5">
               <Label htmlFor="deal-lead">Lead</Label>
-              {leads.length > 0 ? (
+              {snapshotOff ? (
+                <Input
+                  value={leadQuery}
+                  onChange={(e) => setLeadQuery(e.target.value)}
+                  placeholder="Search leads…"
+                  className="h-8"
+                />
+              ) : null}
+              {pickerLeads.length > 0 ? (
                 <Select
                   value={resolvedLeadId}
                   onValueChange={(leadId) =>
@@ -278,7 +311,7 @@ export function NewDealDialog({
                     <SelectValue placeholder="Select lead">{dealLeadTriggerLabel ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {leads.map((l) => (
+                    {pickerLeads.map((l) => (
                       <SelectItem key={l.id} value={l.id}>
                         {l.companyName}, {l.contactName}
                       </SelectItem>

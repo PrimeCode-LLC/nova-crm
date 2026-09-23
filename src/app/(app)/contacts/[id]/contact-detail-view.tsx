@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/table";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { UserChip } from "@/components/common/user-chip";
 import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
@@ -26,12 +28,20 @@ import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { initials, fmtRelative } from "@/lib/format";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
-import type { Contact } from "@/lib/types";
+import type { Contact, Lead } from "@/lib/types";
 
 export function ContactDetailView({ contactId }: { contactId: string }) {
   const ws = useWorkspace();
   const [fetchedContact, setFetchedContact] = React.useState<Contact | null>(null);
   const [fetchDone, setFetchDone] = React.useState(false);
+  const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
+  const relatedOn = snapshotOff && !ws.isDemo;
+  const leadPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: relatedOn,
+    limit: 50,
+    filters: { contactId },
+  });
   const contactFromWs = ws.getContactById(contactId);
   const contact = contactFromWs ?? fetchedContact ?? undefined;
 
@@ -72,7 +82,9 @@ export function ContactDetailView({ contactId }: { contactId: string }) {
   }
 
   const account = ws.getAccountById(contact.accountId);
-  const leads = ws.leads.filter((l) => l.contactId === contact.id);
+  const leads = relatedOn
+    ? (leadPages.items as Lead[])
+    : ws.leads.filter((l) => l.contactId === contact.id);
   const displayName =
     contact.fullName?.trim() ||
     [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim() ||

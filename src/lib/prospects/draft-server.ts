@@ -28,6 +28,7 @@ import {
   type ProspectDraftOrigin,
   type ProspectDraftSourceSummary,
 } from "@/lib/prospects/draft-types";
+import { countCompanyProspectsForActor } from "@/lib/prospects/count-company-prospects-server";
 import {
   buildProspectEntities,
   domainFromWebsiteOrEmail,
@@ -1091,13 +1092,23 @@ export async function completeProspectDraft(input: {
   }
   {
     const form = prospectFormFromDraft(draft);
-    const [organizationSnap, strategySnap, ownedLeadsSnap] = await Promise.all([
+    const companyDomainForCount = domainFromWebsiteOrEmail(form.website, form.email)?.toLocaleLowerCase();
+    const companyNameForCount = form.bizName.trim();
+    const [organizationSnap, strategySnap, existingContactsForCompany] = await Promise.all([
       db.collection(COLLECTIONS.organizations).doc(input.organizationId).get(),
       form.strategyId
         ? db.collection(COLLECTIONS.prospectingStrategies).doc(form.strategyId).get()
         : Promise.resolve(null),
-      db.collection(COLLECTIONS.leads).where("prospectOwnerId", "==", input.userId).limit(500).get(),
+      countCompanyProspectsForActor({
+        organizationId: input.organizationId,
+        userId: input.userId,
+        companyDomain: companyDomainForCount,
+        companyName: companyNameForCount,
+      }).catch(() => null),
     ]);
+    if (existingContactsForCompany === null) {
+      return { error: "Could not verify how many contacts this company already has." };
+    }
     const organization = organizationSnap.data();
     const strategy = strategySnap?.data();
     if (
@@ -1146,17 +1157,6 @@ export async function completeProspectDraft(input: {
       typeof strategy?.dailyTargets?.maxContactsPerCompany === "number"
         ? strategy.dailyTargets.maxContactsPerCompany
         : 2;
-    const companyDomain = domainFromWebsiteOrEmail(form.website, form.email)?.toLocaleLowerCase();
-    const companyName = form.bizName.trim().toLocaleLowerCase();
-    const existingContactsForCompany = ownedLeadsSnap.docs.filter((document) => {
-      const row = document.data();
-      if (row.organizationId !== input.organizationId) return false;
-      const rowDomain = String(row.companyDomain ?? "").trim().toLocaleLowerCase();
-      const rowName = String(row.companyName ?? "").trim().toLocaleLowerCase();
-      return Boolean(
-        (companyDomain && rowDomain === companyDomain) || (companyName && rowName === companyName),
-      );
-    }).length;
     const validation = validateProspectForm(form, {
       existingContactsForCompany,
       maxContactsPerCompany,
@@ -1255,9 +1255,9 @@ export async function completeProspectDraft(input: {
         stableOperationId("email", input.organizationId, email),
       ),
     );
-    const companyIdentity = companyDomain
-      ? `domain:${companyDomain}`
-      : `name:${normalizeCompanyIdentity(companyName)}`;
+    const companyIdentity = companyDomainForCount
+      ? `domain:${companyDomainForCount}`
+      : `name:${normalizeCompanyIdentity(companyNameForCount)}`;
     const companyReservationRef = reservationCollection.doc(
       stableOperationId(
         "company",

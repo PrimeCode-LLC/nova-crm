@@ -48,4 +48,20 @@ describe("countStrategyDayProgress assignment attribution", () => {
     expect(progress.completed).toBe(1);
     expect(progress.incomplete).toBe(1);
   });
+
+  it("uses an explicit org-day window instead of the runtime local calendar", () => {
+    const progress = countStrategyDayProgress({
+      leads: [
+        prospect({ id: "1", assignmentId: "assignment-1", status: "completed" }),
+        {
+          ...prospect({ id: "2", assignmentId: "assignment-1", status: "completed" }),
+          createdAt: "2026-07-20T23:00:00.000Z",
+        },
+      ],
+      userId: "user-1",
+      dayStart: new Date("2026-07-21T00:00:00.000Z"),
+      dayEnd: new Date("2026-07-22T00:00:00.000Z"),
+    });
+    expect(progress.researched).toBe(1);
+  });
 });

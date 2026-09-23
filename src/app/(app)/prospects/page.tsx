@@ -24,6 +24,7 @@ import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
 import { ProspectDraftBanner } from "@/components/prospects/prospect-draft-banner";
 import { filterActiveLeads } from "@/lib/leads/lead-archive";
 import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { CrmListLoadMore } from "@/components/common/crm-list-load-more";
 
 const LeadsTable = dynamic(
   () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
@@ -231,6 +232,10 @@ function ProspectsPageInner() {
             initialOwnerScope={ownerScope}
           />
         )}
+        <CrmListLoadMore
+          hasMore={crmPages.hasNextPage}
+          onLoadMore={() => void crmPages.fetchNextPage()}
+        />
       </PageBody>
     </AppPage>
   );

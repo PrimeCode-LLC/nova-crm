@@ -38,6 +38,14 @@ import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 import { hasPendingReplyAction } from "@/lib/email/reply-action-pending";
 import { isFollowupOverdue } from "@/lib/followup-open-status";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import { peekCrmEntity } from "@/lib/crm/entity-cache";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import {
+  useCachedLeadIds,
+  useNeedsAttentionLeads,
+  useRememberLeadsByIds,
+} from "@/hooks/use-snapshot-crm";
 
 /** Archived or closed (won/lost) leads should not surface on Needs attention. */
 function isClosedOrArchivedLead(lead: Lead | undefined): boolean {
@@ -158,6 +166,7 @@ export function DashboardNeedsAttention({
   contentScope = "mine",
   currentUserId,
   wall,
+  narrow = false,
   className,
 }: {
   leads: readonly Lead[];
@@ -170,12 +179,43 @@ export function DashboardNeedsAttention({
   contentScope?: "mine" | "team";
   currentUserId: string;
   wall?: boolean;
+  /** Pass `narrow=1` on the lead list when this viewer does not see the whole tenant. Wall stays false. */
+  narrow?: boolean;
   className?: string;
 }) {
   const [now] = React.useState(() => Date.now());
   const [allOpen, setAllOpen] = React.useState(false);
   const timeZone = useOrgTimezone();
-  const leadById = new Map(leads.map((lead) => [lead.id, lead]));
+  const { isDemo } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const loadLists = snapshotOff && leads.length === 0;
+  const idleLimit = wall ? 6 : 8;
+  const attentionLeads = useNeedsAttentionLeads({
+    enabled: loadLists,
+    narrow,
+    idleLimit,
+  });
+  const labelLeadIds = React.useMemo(() => {
+    const ids: string[] = [];
+    for (const followup of followups) if (followup.leadId) ids.push(followup.leadId);
+    for (const task of tasks) if (task.leadId) ids.push(task.leadId);
+    for (const plan of plans) if (plan.leadId) ids.push(plan.leadId);
+    return ids;
+  }, [followups, tasks, plans]);
+  useRememberLeadsByIds(labelLeadIds, loadLists);
+  const cachedLabelIds = useCachedLeadIds(loadLists ? labelLeadIds : []);
+  const resolvedLeads = React.useMemo(() => {
+    if (!loadLists) return leads;
+    const byId = new Map<string, Lead>();
+    for (const lead of attentionLeads.data ?? []) byId.set(lead.id, lead);
+    for (const id of cachedLabelIds.split(",")) {
+      if (!id || byId.has(id)) continue;
+      const peeked = peekCrmEntity("leads", id);
+      if (peeked) byId.set(id, peeked);
+    }
+    return [...byId.values()];
+  }, [loadLists, leads, attentionLeads.data, cachedLabelIds]);
+  const leadById = new Map(resolvedLeads.map((lead) => [lead.id, lead]));
   const leadFor = (leadId: string | undefined) => (leadId ? leadById.get(leadId) : undefined);
   const leadLabel = (leadId: string | undefined) => leadEntityLabel(leadFor(leadId));
 
@@ -225,7 +265,7 @@ export function DashboardNeedsAttention({
     });
   }
 
-  for (const lead of leads) {
+  for (const lead of resolvedLeads) {
     if (isClosedOrArchivedLead(lead)) continue;
     if (!hasPendingReplyReview(lead)) continue;
     const aiReady = hasPendingReplyAction(lead);
@@ -247,7 +287,7 @@ export function DashboardNeedsAttention({
     });
   }
 
-  for (const lead of leads) {
+  for (const lead of resolvedLeads) {
     if (isClosedOrArchivedLead(lead)) continue;
     if (!hasPendingReplyAction(lead)) continue;
     // Already covered above when reply review is also pending.
@@ -357,7 +397,7 @@ export function DashboardNeedsAttention({
     });
   }
 
-  for (const lead of leads) {
+  for (const lead of resolvedLeads) {
     if (isClosedOrArchivedLead(lead)) continue;
     if (lead.intakeKind === "prospect" || !lead.isIdle) continue;
     if (hasPendingReplyReview(lead) || hasPendingReplyAction(lead)) continue;

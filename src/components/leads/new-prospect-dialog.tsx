@@ -32,6 +32,9 @@ import { COLLECTIONS } from "@/lib/documents/collections";
 import { doc, getDoc } from "@/lib/db/document-shim/shim-client-firestore";
 import { findContactByEmail } from "@/lib/crm-dedupe";
 import { fetchCrmDedupeClient } from "@/lib/crm-dedupe-client";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { fetchCompanyProspectCountForMe } from "@/lib/prospects/fetch-company-prospect-count";
+import { fetchExactCompanyProspects } from "@/lib/prospects/fetch-company-prospects";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { channelLabelFromValue } from "@/lib/channel-options";
 import { useChannelOptions } from "@/hooks/use-channel-options";
@@ -40,6 +43,7 @@ import { cn } from "@/lib/utils";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import { activeAssignmentsForUser } from "@/lib/prospecting-strategy/allocation";
 import { countCompanyContactsForUser } from "@/lib/prospecting-strategy/progress";
+import type { Lead } from "@/lib/types";
 import {
   evaluateQualifyGate,
   collapseAccidentalDoubleName,
@@ -452,7 +456,23 @@ export function NewProspectDialog({
     }
 
     const domain = domainFromWebsiteOrEmail(nextForm.website, nextForm.email);
-    const companyContactCount = countCompanyContactsForUser(leads, oid, domain, bn);
+    let companyContactCount = 0;
+    if (isLiveCrmSnapshotDisabled(isDemo) && (domain || bn)) {
+      try {
+        companyContactCount = await fetchCompanyProspectCountForMe(
+          domain ? { companyDomain: domain } : { companyName: bn },
+        );
+      } catch {
+        const companyLeads = await fetchExactCompanyProspects(
+          domain
+            ? { intakeKind: "prospect", companyDomain: domain }
+            : { intakeKind: "prospect", companyNameExact: bn },
+        );
+        companyContactCount = countCompanyContactsForUser(companyLeads, oid, domain, bn);
+      }
+    } else {
+      companyContactCount = countCompanyContactsForUser(leads, oid, domain, bn);
+    }
     const selectedStrategy = selectableStrategies.find((strategy) => strategy.id === nextForm.strategyId);
     const maxContacts = resolveDailyTargets(selectedStrategy).maxContactsPerCompany ?? 2;
     const emailIsVerified = nextForm.emailVerify === "verified";

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { parseCrmEntityListFilters } from "@/lib/db/crm-list-filters";
-import { resolveCrmListNarrowToMember } from "@/lib/db/crm-list-scope";
+import { resolveCrmListNarrowForSession } from "@/lib/db/crm-list-scope";
 import {
   countAccountsInPostgres,
   CRM_LIST_MAX_PAGE_SIZE,
@@ -40,9 +40,10 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const narrowToMember = resolveCrmListNarrowToMember(
+  const narrowToMember = await resolveCrmListNarrowForSession(
     guard.ctx.role,
     url.searchParams.get("narrow"),
+    guard.ctx.session.uid,
   );
   const all = url.searchParams.get("all") === "1";
   const countOnly = url.searchParams.get("countOnly") === "1";

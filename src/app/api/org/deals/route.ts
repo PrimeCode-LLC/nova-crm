@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 
 import { parseCrmEntityListFilters } from "@/lib/db/crm-list-filters";
-import { resolveCrmListNarrowToMember } from "@/lib/db/crm-list-scope";
+import { resolveCrmListNarrowForSession } from "@/lib/db/crm-list-scope";
+import { dealSumValueConflictsWithList } from "@/lib/deals/stage-sum-money";
 import {
   countDealsInPostgres,
   CRM_LIST_MAX_PAGE_SIZE,
   CRM_LIST_PAGE_SIZE,
   listDealsFromPostgres,
   listDealsPageFromPostgres,
+  sumDealsByStageInPostgres,
 } from "@/lib/db/list-crm-postgres";
 import { isPostgresReadCrmV1Enabled } from "@/lib/db/postgres-read-crm-flags";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
@@ -17,6 +19,8 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
  * GET /api/org/deals — feature-flagged Postgres deals list (P6.1).
  *
  * Query: `narrow=1`, `limit`, `cursor`, `all=1` (same shape as `/api/org/leads`).
+ * `sumValue=1` returns `sumByStage` for the same scope and does not include a deal page.
+ * It cannot be combined with `all`, `cursor`, or `limit`.
  */
 export async function GET(req: Request) {
   const guard = await guardTenantApi();
@@ -40,12 +44,14 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url);
-  const narrowToMember = resolveCrmListNarrowToMember(
+  const narrowToMember = await resolveCrmListNarrowForSession(
     guard.ctx.role,
     url.searchParams.get("narrow"),
+    guard.ctx.session.uid,
   );
   const all = url.searchParams.get("all") === "1";
   const countOnly = url.searchParams.get("countOnly") === "1";
+  const sumValue = url.searchParams.get("sumValue") === "1";
   const cursor = url.searchParams.get("cursor");
   const limitRaw = url.searchParams.get("limit");
   const limit = limitRaw ? Number.parseInt(limitRaw, 10) : CRM_LIST_PAGE_SIZE;
@@ -54,7 +60,41 @@ export async function GET(req: Request) {
   const viewerUid = guard.ctx.session.uid;
   const listOpts = { organizationId, narrowToMember, viewerUid, filters };
 
+  if (
+    sumValue &&
+    dealSumValueConflictsWithList({
+      all,
+      cursor,
+      limitSpecified: Boolean(limitRaw),
+    })
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        enabled: true,
+        source: null,
+        error: "sumValue cannot be combined with all, cursor, or limit",
+      },
+      { status: 400 },
+    );
+  }
+
   try {
+    if (sumValue) {
+      const sumByStage = await sumDealsByStageInPostgres(listOpts);
+      return NextResponse.json({
+        ok: true,
+        enabled: true,
+        source: "postgres" as const,
+        deals: [],
+        count: 0,
+        hasMore: false,
+        nextCursor: null,
+        sumByStage,
+        narrow: narrowToMember,
+      });
+    }
+
     if (countOnly) {
       const totalCount = await countDealsInPostgres(listOpts);
       return NextResponse.json({

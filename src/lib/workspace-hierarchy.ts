@@ -36,13 +36,23 @@ export function collectDescendantUserIds(
   return ids;
 }
 
+/** Tenant-wide CRM visibility. Shared by the client hierarchy and list APIs. */
+export function seesAllCrmInTenant(input: {
+  orgRole?: string | null;
+  roleId?: string | null;
+  isSuperAdmin?: boolean;
+}): boolean {
+  if (input.isSuperAdmin) return true;
+  if (input.roleId === "director") return true;
+  return input.orgRole === "owner" || input.orgRole === "admin";
+}
+
 export function seesAllLeadsInTenant(viewer: User): boolean {
-  if (viewer.roleId === "director") return true;
-  if (viewer.isSuperAdmin) return true;
-  if (viewer.orgRole === "owner" || viewer.orgRole === "admin") {
-    return true;
-  }
-  return false;
+  return seesAllCrmInTenant({
+    orgRole: viewer.orgRole,
+    roleId: viewer.roleId,
+    isSuperAdmin: viewer.isSuperAdmin,
+  });
 }
 
 /**
@@ -152,7 +162,15 @@ export function followupVisibleInHierarchyScope(
   visibleLeadIds: Set<string>,
   visibleDealIds: Set<string>,
   activityActorIds: Set<string>,
+  options?: { snapshotCutoverActive?: boolean },
 ): boolean {
+  // Cutover: lead rows are not in memory. Server member-scope already limited
+  // these rows, so a missing lead id must not drop them. Standalone reminders
+  // still follow the activity-actor scope.
+  if (options?.snapshotCutoverActive) {
+    if (f.leadId || f.dealId) return true;
+    return activityActorIds.has(f.ownerId);
+  }
   if (f.leadId && visibleLeadIds.has(f.leadId)) return true;
   if (f.dealId && visibleDealIds.has(f.dealId)) return true;
   if (!f.leadId && !f.dealId && activityActorIds.has(f.ownerId)) return true;
@@ -168,10 +186,12 @@ export function applyLiveHierarchyScope(
   snapshot: WorkspaceSnapshot,
   viewer: User,
   orgUsers: readonly User[],
+  options?: { snapshotCutoverActive?: boolean },
 ): WorkspaceSnapshot {
   if (seesAllLeadsInTenant(viewer)) {
     return snapshot;
   }
+  const snapshotCutoverActive = options?.snapshotCutoverActive === true;
 
   const dirIds = directoryUserIdsForLive(viewer, orgUsers);
   const users = dirIds === null ? snapshot.users : snapshot.users.filter((u) => dirIds.has(u.id));
@@ -183,29 +203,41 @@ export function applyLiveHierarchyScope(
   const visibleLeadIds = new Set(leads.map((l) => l.id));
   const visibleAccountIds = new Set(leads.map((l) => l.accountId));
 
-  const deals = snapshot.deals.filter((d) => visibleLeadIds.has(d.leadId));
+  const deals = snapshotCutoverActive
+    ? snapshot.deals
+    : snapshot.deals.filter((d) => visibleLeadIds.has(d.leadId));
   const visibleDealIds = new Set(deals.map((d) => d.id));
 
   const accounts = snapshot.accounts.filter((a) => visibleAccountIds.has(a.id));
   const contacts = snapshot.contacts.filter((c) => visibleAccountIds.has(c.accountId));
 
-  const touchpoints = snapshot.touchpoints.filter((t) => visibleLeadIds.has(t.leadId));
+  const touchpoints = snapshotCutoverActive
+    ? snapshot.touchpoints
+    : snapshot.touchpoints.filter((t) => visibleLeadIds.has(t.leadId));
 
   const timelineByLead: Record<string, TimelineEvent[]> = {};
-  for (const id of visibleLeadIds) {
-    const te = snapshot.timelineByLead[id];
-    if (te) timelineByLead[id] = te;
+  if (snapshotCutoverActive) {
+    Object.assign(timelineByLead, snapshot.timelineByLead);
+  } else {
+    for (const id of visibleLeadIds) {
+      const te = snapshot.timelineByLead[id];
+      if (te) timelineByLead[id] = te;
+    }
   }
 
   const activityActorIds = activityActorUserIdsVisibleToViewer(viewer, orgUsers)!;
 
   const followups = snapshot.followups.filter((f) =>
-    followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, activityActorIds),
+    followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, activityActorIds, {
+      snapshotCutoverActive,
+    }),
   );
 
   const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, viewer, orgUsers);
 
-  const notes = snapshot.notes.filter((n) => n.leadId && visibleLeadIds.has(n.leadId));
+  const notes = snapshotCutoverActive
+    ? snapshot.notes
+    : snapshot.notes.filter((n) => n.leadId && visibleLeadIds.has(n.leadId));
 
   const profiles =
     dirIds === null ? snapshot.profiles : snapshot.profiles.filter((p) => dirIds.has(p.ownerId));
@@ -216,9 +248,11 @@ export function applyLiveHierarchyScope(
       : snapshot.permissionOverrides.filter((po) => dirIds.has(po.userId));
   const activityCounters = snapshot.activityCounters.filter((row) => activityActorIds.has(row.userId));
 
-  const activityRecords = snapshot.activityRecords.filter(
-    (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
-  );
+  const activityRecords = snapshotCutoverActive
+    ? snapshot.activityRecords
+    : snapshot.activityRecords.filter(
+        (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
+      );
 
   const orgActivityEvents = snapshot.orgActivityEvents.filter(
     (e) => e.actorId === "system" || activityActorIds.has(e.actorId),

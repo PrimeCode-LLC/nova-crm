@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { filterArchivedLeads, filterActiveLeads } from "@/lib/leads/lead-archive";
 import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { CrmListLoadMore } from "@/components/common/crm-list-load-more";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { toast } from "sonner";
 import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
 import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
@@ -33,10 +35,11 @@ export default function ArchivePage() {
     currentUserId,
     addOrgActivityEvent,
   } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
   const crmPages = useCrmEntityPages({
     entity: "leads",
     enabled: !isDemo,
-    drain: true,
+    drain: !snapshotOff,
     filters: { archivedOnly: true },
   });
   const leads = React.useMemo(() => {
@@ -156,6 +159,12 @@ export default function ArchivePage() {
         ) : (
           <LeadsTable leads={leads} listMode="archived" linkFromKey="archive" />
         )}
+        {snapshotOff ? (
+          <CrmListLoadMore
+            hasMore={crmPages.hasNextPage}
+            onLoadMore={() => void crmPages.fetchNextPage()}
+          />
+        ) : null}
       </PageBody>
     </AppPage>
   );

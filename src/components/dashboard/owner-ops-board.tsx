@@ -119,6 +119,7 @@ export function OwnerOpsBoard({
   isDemo,
   wallPrefs,
   orgWideScope = false,
+  narrowLists = false,
   extraSentAts,
 }: {
   metrics: DashboardWorkflowMetrics;
@@ -146,6 +147,8 @@ export function OwnerOpsBoard({
   wallPrefs?: WallPreferences;
   /** Org-wide (no channel/owner filters) — enables Redis scoreboards when flag on. */
   orgWideScope?: boolean;
+  /** Snapshot-off lead lists: true when this viewer does not see every lead in the tenant. */
+  narrowLists?: boolean;
   /** Compose / inbox / reply send timestamps for email volume. */
   extraSentAts?: readonly number[];
 }) {
@@ -202,6 +205,7 @@ export function OwnerOpsBoard({
           currentUserId={currentUserId}
           contentScope="team"
           wall
+          narrow={narrowLists}
           className="min-h-0 flex-1"
         />
       ) : null,
@@ -388,6 +392,7 @@ export function OwnerOpsBoard({
     teamCommandDeals,
     teamCommandFollowups,
     orgWideScope,
+    narrowLists,
     meetings,
     timelineByLead,
     orgActivityEvents,
@@ -516,6 +521,7 @@ export function OwnerOpsBoard({
                   tasks={tasks}
                   currentUserId={currentUserId}
                   contentScope="team"
+                  narrow={narrowLists}
                 />
               ) : null}
               {showInboxPerformance ? (

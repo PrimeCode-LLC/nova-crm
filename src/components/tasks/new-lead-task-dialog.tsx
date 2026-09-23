@@ -24,6 +24,9 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { peekCrmEntity } from "@/lib/crm/entity-cache";
 import { useOrgMembers } from "@/hooks/use-org-members";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
@@ -116,6 +119,20 @@ export function NewLeadTaskDialog({
   const [taskType, setTaskType] = React.useState<LeadTaskType>("review");
   const [visibility, setVisibility] = React.useState<LeadTaskVisibility>("on_lead");
   const [dueDate, setDueDate] = React.useState("");
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const [leadQuery, setLeadQuery] = React.useState("");
+  const [debouncedLeadQuery, setDebouncedLeadQuery] = React.useState("");
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedLeadQuery(leadQuery.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [leadQuery]);
+  const searchedLeads = useCrmEntityPages({
+    entity: "leads",
+    enabled: snapshotOff && open && !fixedLeadId && debouncedLeadQuery.length >= 1,
+    limit: 20,
+    filters: { q: debouncedLeadQuery, activeOnly: true },
+  });
+  const pickerLeads = snapshotOff ? (searchedLeads.items as Lead[]) : leads;
   const membersQuery = useOrgMembers(open && !isDemo);
   const assigneesLoading = open && !isDemo && membersQuery.isLoading;
   const assigneeOptions = React.useMemo(() => {
@@ -140,7 +157,7 @@ export function NewLeadTaskDialog({
     seededRef.current = true;
     const fixed = fixedLeadId ? leads.find((l) => l.id === fixedLeadId) : undefined;
     React.startTransition(() => {
-      setLeadId(fixedLeadId ?? leads[0]?.id ?? "");
+      setLeadId(fixedLeadId ?? (snapshotOff ? "" : (leads[0]?.id ?? "")));
       setTitle(fixed ? `${TASK_TYPES[0].label}: ${fixed.companyName}` : "");
       setDescription("");
       setTaskType("review");
@@ -148,7 +165,7 @@ export function NewLeadTaskDialog({
       setDueDate("");
       setAssigneeId("");
     });
-  }, [open, leads, fixedLeadId]);
+  }, [open, leads, fixedLeadId, snapshotOff]);
 
   React.useEffect(() => {
     if (!open || assigneeOptions.length === 0) return;
@@ -159,8 +176,14 @@ export function NewLeadTaskDialog({
     });
   }, [open, assigneeOptions, currentUserId]);
 
-  const selectedLead = leadId ? leads.find((l) => l.id === leadId) : undefined;
-  const linkedLead = fixedLeadId ? leads.find((l) => l.id === fixedLeadId) : selectedLead;
+  const selectedLead = leadId
+    ? pickerLeads.find((l) => l.id === leadId) ??
+      leads.find((l) => l.id === leadId) ??
+      peekCrmEntity("leads", leadId)
+    : undefined;
+  const linkedLead = fixedLeadId
+    ? leads.find((l) => l.id === fixedLeadId) ?? peekCrmEntity("leads", fixedLeadId)
+    : selectedLead;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -249,6 +272,14 @@ export function NewLeadTaskDialog({
             {!fixedLeadId && (
               <div className="grid gap-2">
                 <Label htmlFor="task-lead">Lead (optional)</Label>
+                {snapshotOff ? (
+                  <Input
+                    value={leadQuery}
+                    onChange={(e) => setLeadQuery(e.target.value)}
+                    placeholder="Search leads"
+                    autoComplete="off"
+                  />
+                ) : null}
                 <Select
                   value={leadId || "__none__"}
                   onValueChange={(v) => {
@@ -257,7 +288,7 @@ export function NewLeadTaskDialog({
                   }}
                   items={[
                     { value: "__none__", label: "No lead, internal task" },
-                    ...leads.map((l) => ({
+                    ...pickerLeads.map((l) => ({
                       value: l.id,
                       label: `${l.contactName} · ${l.companyName}`,
                     })),
@@ -269,13 +300,13 @@ export function NewLeadTaskDialog({
                         leadId || LEAD_NONE,
                         LEAD_NONE,
                         "No lead, internal task",
-                        leads,
+                        pickerLeads,
                       ) ?? undefined}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">No lead, internal task</SelectItem>
-                    {leads.map((l) => (
+                    {pickerLeads.map((l) => (
                       <SelectItem key={l.id} value={l.id}>
                         {l.contactName} · {l.companyName}
                       </SelectItem>

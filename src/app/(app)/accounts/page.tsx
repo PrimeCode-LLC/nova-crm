@@ -19,6 +19,8 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { CrmListLoadMore } from "@/components/common/crm-list-load-more";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { fmtCurrency, fmtNumber, fmtRelative } from "@/lib/format";
 import { COMPANY_SIZES, REVENUE_RANGES } from "@/lib/constants";
 import { UserChip } from "@/components/common/user-chip";
@@ -143,11 +145,14 @@ function SortableTableHead({
 export default function AccountsPage() {
   const router = useRouter();
   const { accounts: wsAccounts, isDemo, workspaceLoading, getUserById } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const [query, setQuery] = React.useState("");
   const crmPages = useCrmEntityPages({
     entity: "accounts",
     enabled: !isDemo,
-    drain: true,
+    drain: !snapshotOff,
     includeTotalCount: true,
+    filters: snapshotOff && query.trim() ? { q: query.trim() } : undefined,
   });
   const accounts = React.useMemo(() => {
     if (crmPages.enabled) return crmPages.items as typeof wsAccounts;
@@ -155,7 +160,6 @@ export default function AccountsPage() {
   }, [crmPages.enabled, crmPages.items, wsAccounts]);
   const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const { openQuickAdd } = useOpenQuickAdd();
-  const [query, setQuery] = React.useState("");
   const [sortKey, setSortKey] = React.useState<SortKey | null>(null);
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
 
@@ -379,6 +383,12 @@ export default function AccountsPage() {
               </span>{" "}
               companies
             </div>
+            {snapshotOff ? (
+              <CrmListLoadMore
+                hasMore={crmPages.hasNextPage}
+                onLoadMore={() => void crmPages.fetchNextPage()}
+              />
+            ) : null}
           </>
         )}
       </PageBody>

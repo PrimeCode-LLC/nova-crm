@@ -20,8 +20,11 @@ import {
 import { ADMIN_SUBSECTIONS, adminSubSectionHref } from "@/lib/admin-sections";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { channelLabelFromValue } from "@/lib/channel-options";
+import type { Account, Contact, Lead } from "@/lib/types";
 import { useChannelOptions } from "@/hooks/use-channel-options";
 import { Plus, Sparkles, Target, Building2, User, IdCard, ScanSearch } from "lucide-react";
 
@@ -33,8 +36,40 @@ export function GlobalCommandMenu({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const { leads, accounts, contacts, users, profiles, requestWorkspaceGroups } = useWorkspace();
+  const { leads, accounts, contacts, users, profiles, requestWorkspaceGroups, isDemo } = useWorkspace();
   const profileChannelOptions = useChannelOptions();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const [query, setQuery] = React.useState("");
+  const q = query.trim();
+  const leadHits = useCrmEntityPages({
+    entity: "leads",
+    enabled: snapshotOff && open && q.length >= 2,
+    limit: 6,
+    filters: { q },
+  });
+  const accountHits = useCrmEntityPages({
+    entity: "accounts",
+    enabled: snapshotOff && open && q.length >= 2,
+    limit: 5,
+    filters: { q },
+  });
+  const contactHits = useCrmEntityPages({
+    entity: "contacts",
+    enabled: snapshotOff && open && q.length >= 2,
+    limit: 5,
+    filters: { q },
+  });
+  const leadRows = snapshotOff ? (q.length >= 2 ? (leadHits.items as Lead[]) : []) : leads.slice(0, 6);
+  const accountRows = snapshotOff
+    ? q.length >= 2
+      ? (accountHits.items as Account[])
+      : []
+    : accounts.slice(0, 5);
+  const contactRows = snapshotOff
+    ? q.length >= 2
+      ? (contactHits.items as Contact[])
+      : []
+    : contacts.slice(0, 5);
 
   React.useEffect(() => {
     if (!open) return;
@@ -86,7 +121,10 @@ export function GlobalCommandMenu({
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput placeholder="Search leads, companies, pages…" />
+      <CommandInput
+        placeholder="Search leads, companies, pages…"
+        onValueChange={setQuery}
+      />
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
 
@@ -201,8 +239,12 @@ export function GlobalCommandMenu({
         {showTeamJumpList && <CommandSeparator />}
 
         <CommandGroup heading="Leads">
-          {leads.slice(0, 6).map((l) => (
-            <CommandItem key={l.id} onSelect={() => go(`/leads/${l.id}`)}>
+          {leadRows.map((l) => (
+            <CommandItem
+              key={l.id}
+              value={`${l.contactName ?? ""} ${l.companyName ?? ""} ${l.id}`}
+              onSelect={() => go(`/leads/${l.id}`)}
+            >
               <Target className="mr-2 h-4 w-4" />
               <span>{l.contactName}</span>
               <span className="ml-auto text-xs text-muted-foreground">{l.companyName}</span>
@@ -211,8 +253,12 @@ export function GlobalCommandMenu({
         </CommandGroup>
 
         <CommandGroup heading="Companies">
-          {accounts.slice(0, 5).map((a) => (
-            <CommandItem key={a.id} onSelect={() => go(`/accounts/${a.id}`)}>
+          {accountRows.map((a) => (
+            <CommandItem
+              key={a.id}
+              value={`${a.name ?? ""} ${a.industry ?? ""} ${a.id}`}
+              onSelect={() => go(`/accounts/${a.id}`)}
+            >
               <Building2 className="mr-2 h-4 w-4" />
               {a.name}
               <span className="ml-auto text-xs text-muted-foreground">{a.industry}</span>
@@ -221,8 +267,12 @@ export function GlobalCommandMenu({
         </CommandGroup>
 
         <CommandGroup heading="Contacts">
-          {contacts.slice(0, 5).map((c) => (
-            <CommandItem key={c.id} onSelect={() => go(`/contacts/${c.id}`)}>
+          {contactRows.map((c) => (
+            <CommandItem
+              key={c.id}
+              value={`${c.fullName ?? ""} ${c.title ?? ""} ${c.id}`}
+              onSelect={() => go(`/contacts/${c.id}`)}
+            >
               <User className="mr-2 h-4 w-4" />
               {c.fullName}
               <span className="ml-auto text-xs text-muted-foreground">{c.title}</span>

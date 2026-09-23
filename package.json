@@ -36,7 +36,10 @@
     "export:prompts-pack": "npx --yes tsx scripts/export-prompts-pack.ts",
     "extension:dev": "npm run dev -w @nova/intent-radar-extension",
     "extension:build": "npm run build -w @nova/intent-radar-extension",
-    "extension:typecheck": "npm run typecheck -w @nova/intent-radar-extension"
+    "extension:typecheck": "npm run typecheck -w @nova/intent-radar-extension",
+    "graphify:build": "python -m graphify extract . --code-only && python -m graphify cluster-only . --no-label",
+    "graphify:update": "python -m graphify update .",
+    "graphify:watch": "python -m graphify watch ."
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.78",

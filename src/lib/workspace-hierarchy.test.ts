@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { User } from "@/lib/types";
+import type { Followup, User } from "@/lib/types";
+import { LIVE_SNAPSHOT } from "@/lib/workspace-dataset-core";
 import {
+  applyLiveHierarchyScope,
   leadOwnerIdsVisibleToViewer,
   seesAllLeadsInTenant,
 } from "@/lib/workspace-hierarchy";
@@ -37,6 +39,30 @@ describe("workspace hierarchy visibility", () => {
     expect(leadOwnerIdsVisibleToViewer(viewer, [viewer, peer])).toEqual(
       new Set(["viewer"]),
     );
+  });
+
+  it("keeps lead-linked follow-ups when the snapshot cutover has no leads", () => {
+    const viewer = user("viewer");
+    const followup = {
+      id: "fu-1",
+      leadId: "lead-1",
+      title: "Call",
+      dueAt: NOW,
+      ownerId: viewer.id,
+      priority: "medium",
+      auto: false,
+    } as Followup;
+    const snapshot = { ...LIVE_SNAPSHOT, leads: [], followups: [followup] };
+
+    const cutover = applyLiveHierarchyScope(snapshot, viewer, [viewer], {
+      snapshotCutoverActive: true,
+    });
+    expect(cutover.followups.map((row) => row.id)).toEqual(["fu-1"]);
+
+    const legacy = applyLiveHierarchyScope(snapshot, viewer, [viewer], {
+      snapshotCutoverActive: false,
+    });
+    expect(legacy.followups).toEqual([]);
   });
 
   it("does not give workspace managers tenant-wide CRM access", () => {

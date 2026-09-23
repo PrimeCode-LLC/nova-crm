@@ -35,7 +35,10 @@ import {
 } from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
 import { useDashboardKpis } from "@/hooks/use-dashboard-kpis";
-import { isDashboardKpiApiV2Enabled } from "@/lib/dashboard-kpi-v2-flags";
+import { isDashboardKpiApiV2Enabled, isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { seesAllLeadsInTenant } from "@/lib/workspace-hierarchy";
+import { collectWorkflowLinkLeadIds } from "@/lib/dashboard-kpi-scope";
+import { useRememberLeadsByIds } from "@/hooks/use-snapshot-crm";
 import {
   applyOrgDashboardSummaryToWorkflowMetrics,
   applyPersonDashboardGaugesToWorkflowMetrics,
@@ -296,6 +299,17 @@ function DashboardWallPageInner() {
     return () => window.removeEventListener("popstate", onPop);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armedHash]);
+
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const narrowLists = Boolean(viewer && !seesAllLeadsInTenant(viewer));
+  const workflowLinkIds = React.useMemo(
+    () =>
+      snapshotOff && leads.length === 0
+        ? collectWorkflowLinkLeadIds({ followups, leadTasks, plans: followupPlans })
+        : [],
+    [snapshotOff, leads.length, followups, leadTasks, followupPlans],
+  );
+  useRememberLeadsByIds(workflowLinkIds, snapshotOff && leads.length === 0);
 
   const composeSentAts = React.useMemo(
     () => composeEmailSentAtsFromTimeline(flattenTimelineByLead(timelineByLead)),
@@ -638,6 +652,7 @@ function DashboardWallPageInner() {
           isDemo={isDemo}
           wallPrefs={wallPrefs}
           orgWideScope
+          narrowLists={narrowLists}
           extraSentAts={composeSentAts}
         />
       </div>

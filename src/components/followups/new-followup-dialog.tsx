@@ -16,6 +16,8 @@ import {
   OWNER_SCOPE_PREFIX,
 } from "@/lib/owner-scope";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { todayDateInputValue } from "@/lib/followup-date";
@@ -172,6 +174,30 @@ export function NewFollowupDialog({
     return rows;
   }, [leads, leadOwnerScope, leadActivityDate, ownerScopeDeps, timeZone]);
 
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const [leadQuery, setLeadQuery] = React.useState("");
+  const [debouncedLeadQuery, setDebouncedLeadQuery] = React.useState("");
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedLeadQuery(leadQuery.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [leadQuery]);
+  const searchOwnerId = leadOwnerScope.startsWith(OWNER_SCOPE_PREFIX)
+    ? leadOwnerScope.slice(OWNER_SCOPE_PREFIX.length)
+    : leadOwnerScope === "me"
+      ? currentUserId
+      : undefined;
+  const searchedLeads = useCrmEntityPages({
+    entity: "leads",
+    enabled: snapshotOff && open && !fixedLeadId && debouncedLeadQuery.length >= 1,
+    limit: 20,
+    filters: {
+      q: debouncedLeadQuery,
+      activeOnly: true,
+      ownerId: searchOwnerId,
+    },
+  });
+  const pickerLeads = snapshotOff ? (searchedLeads.items as Lead[]) : filteredLeads;
+
   // Seed once per open — workspace poll must not wipe in-progress form fields.
   const seededRef = React.useRef(false);
 
@@ -216,8 +242,8 @@ export function NewFollowupDialog({
 
   React.useEffect(() => {
     if (!open || fixedLeadId || isEdit) return;
-    if (filteredLeads.some((l) => l.id === leadId)) return;
-    const next = filteredLeads[0];
+    if (pickerLeads.some((l) => l.id === leadId)) return;
+    const next = pickerLeads[0];
     const prevLead = leads.find((l) => l.id === leadId);
     const prevDefault = defaultFollowupTitle(prevLead);
     const titleStillSynced = title.trim() === "" || title === prevDefault;
@@ -227,10 +253,10 @@ export function NewFollowupDialog({
         setTitle(defaultFollowupTitle(next));
       }
     });
-  }, [open, fixedLeadId, isEdit, filteredLeads, leadId, leads, title]);
+  }, [open, fixedLeadId, isEdit, pickerLeads, leadId, leads, title]);
 
   const selectedLead =
-    filteredLeads.find((l) => l.id === leadId) ?? leads.find((l) => l.id === leadId);
+    pickerLeads.find((l) => l.id === leadId) ?? leads.find((l) => l.id === leadId);
 
   async function regenerateStep() {
     if (!editFollowup || !selectedLead) {
@@ -396,7 +422,7 @@ export function NewFollowupDialog({
                     <Select
                       value={leadOwnerScope}
                       onValueChange={(v) => setLeadOwnerScope(v ?? "all-owners")}
-                      disabled={leads.length === 0}
+                      disabled={!snapshotOff && leads.length === 0}
                     >
                       <SelectTrigger className="h-9 min-w-0">
                         <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
@@ -439,18 +465,26 @@ export function NewFollowupDialog({
                       className="h-9"
                       value={leadActivityDate}
                       onChange={(e) => setLeadActivityDate(e.target.value)}
-                      disabled={leads.length === 0}
+                      disabled={!snapshotOff && leads.length === 0}
                     />
                   </div>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="followup-lead">Lead</Label>
-                  <Select
+                    <Label htmlFor="followup-lead">Lead</Label>
+                    {snapshotOff ? (
+                      <Input
+                        value={leadQuery}
+                        onChange={(e) => setLeadQuery(e.target.value)}
+                        placeholder="Search leads"
+                        autoComplete="off"
+                      />
+                    ) : null}
+                    <Select
                     value={leadId}
                     onValueChange={(v) => {
                       if (!v) return;
-                      const prevLead = filteredLeads.find((l) => l.id === leadId);
-                      const nextLead = filteredLeads.find((l) => l.id === v);
+                      const prevLead = pickerLeads.find((l) => l.id === leadId);
+                      const nextLead = pickerLeads.find((l) => l.id === v);
                       const prevDefault = defaultFollowupTitle(prevLead);
                       const titleStillSynced = title.trim() === "" || title === prevDefault;
                       if (nextLead && titleStillSynced) {
@@ -458,15 +492,15 @@ export function NewFollowupDialog({
                       }
                       setLeadId(v);
                     }}
-                    disabled={filteredLeads.length === 0}
+                    disabled={!snapshotOff && filteredLeads.length === 0}
                   >
                     <SelectTrigger id="followup-lead">
                       <SelectValue placeholder="Select a lead">
-                        {leadPickerTriggerLabel(leadId, filteredLeads) ?? undefined}
+                        {leadPickerTriggerLabel(leadId, pickerLeads) ?? undefined}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {filteredLeads.map((l) => (
+                      {pickerLeads.map((l) => (
                         <SelectItem key={l.id} value={l.id}>
                           {l.contactName} · {l.companyName}
                         </SelectItem>

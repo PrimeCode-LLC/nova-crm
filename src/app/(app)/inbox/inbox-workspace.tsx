@@ -95,6 +95,9 @@ import {
   type MailThread,
 } from "@/lib/email/thread-inbound";
 import type { Contact, Lead } from "@/lib/types";
+import { peekCrmEntity, subscribeCrmEntityCache } from "@/lib/crm/entity-cache";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { useRememberLeadsByIds } from "@/hooks/use-snapshot-crm";
 import { resolveLeadIdsByEmailClient } from "@/lib/crm-dedupe-client";
 import { buildLeadEmailToIdMap, leadEmailsWithContact } from "@/lib/followup-plans";
 import { extractEmailAddress } from "@/lib/followup-plan-reply";
@@ -341,7 +344,7 @@ function entitySubFilterLabel(
 ): string | null {
   if (subFilter === ENTITY_SUB_FILTER_ALL) return null;
   if (filter === ENTITY_LEAD_LINKED) {
-    const l = leads.find((x) => x.id === subFilter);
+    const l = leads.find((x) => x.id === subFilter) ?? peekCrmEntity("leads", subFilter);
     if (!l) return null;
     const name = l.contactName?.trim() || l.contactEmail || l.id;
     return l.companyName?.trim() ? `${name} · ${l.companyName.trim()}` : name;
@@ -555,18 +558,6 @@ export default function InboxWorkspace() {
     [users, currentUserId, canViewMemberMailboxes, viewableMailboxIdSet],
   );
 
-  const leadsSortedForMailFilter = React.useMemo(
-    () =>
-      [...leads].sort((a, b) =>
-        (a.contactName?.trim() || a.contactEmail || "").localeCompare(
-          b.contactName?.trim() || b.contactEmail || "",
-          undefined,
-          { sensitivity: "base" },
-        ),
-      ),
-    [leads],
-  );
-
   const contactsSortedForMailFilter = React.useMemo(
     () =>
       [...contacts].sort((a, b) =>
@@ -579,6 +570,10 @@ export default function InboxWorkspace() {
 
   const [remoteEmailMap, setRemoteEmailMap] = React.useState<Record<string, string>>({});
   const resolvingEmailsRef = React.useRef(new Set<string>());
+  const remoteLeadIds = React.useMemo(() => Object.values(remoteEmailMap), [remoteEmailMap]);
+  useRememberLeadsByIds(remoteLeadIds, isLiveCrmSnapshotDisabled(isDemo));
+  const [leadCacheEpoch, setLeadCacheEpoch] = React.useState(0);
+  React.useEffect(() => subscribeCrmEntityCache(() => setLeadCacheEpoch((n) => n + 1)), []);
 
   const emailToLeadId = React.useMemo(() => {
     const map = buildLeadEmailToIdMap(leads, contacts);
@@ -2467,6 +2462,7 @@ export default function InboxWorkspace() {
     const all = { ...EMPTY_MAIL_FILTER_STATS };
     const leadLinked = { ...EMPTY_MAIL_FILTER_STATS };
     const leadUnlinked = { ...EMPTY_MAIL_FILTER_STATS };
+    const matchedLeads = new Map<string, Lead>();
     const contactLinked = { ...EMPTY_MAIL_FILTER_STATS };
     const contactUnlinked = { ...EMPTY_MAIL_FILTER_STATS };
     const byLeadId = new Map<string, MailFilterStats>();
@@ -2488,6 +2484,7 @@ export default function InboxWorkspace() {
       const contact = resolveContactForMailListRow(row, contacts, emailToContactId, contactById);
 
       if (lead) {
+        matchedLeads.set(lead.id, lead);
         leadLinked.total += 1;
         if (rowIsUnread(row)) leadLinked.unread += 1;
         const prev = byLeadId.get(lead.id) ?? { ...EMPTY_MAIL_FILTER_STATS };
@@ -2508,9 +2505,8 @@ export default function InboxWorkspace() {
       }
     }
 
-    const leadsWithMail = leadsSortedForMailFilter
-      .filter((l) => byLeadId.has(l.id))
-      .map((l) => ({ lead: l, stats: byLeadId.get(l.id)! }))
+    const leadsWithMail = [...matchedLeads.values()]
+      .map((lead) => ({ lead, stats: byLeadId.get(lead.id)! }))
       .sort((a, b) => b.stats.unread - a.stats.unread || b.stats.total - a.stats.total);
 
     const contactsWithMail = contactsSortedForMailFilter
@@ -2538,8 +2534,8 @@ export default function InboxWorkspace() {
     leadById,
     emailToContactId,
     contactById,
-    leadsSortedForMailFilter,
     contactsSortedForMailFilter,
+    leadCacheEpoch,
   ]);
 
   const readFilterScopeRows = React.useMemo(() => {
@@ -3050,7 +3046,7 @@ export default function InboxWorkspace() {
     const base = entityMailFilterLabel(entityMailFilter, leads, contacts);
     const sub = entitySubFilterLabel(entityMailFilter, entitySubFilter, leads, contacts);
     return sub ? `${base} · ${sub}` : base;
-  }, [entityMailFilter, entitySubFilter, leads, contacts]);
+  }, [entityMailFilter, entitySubFilter, leads, contacts, leadCacheEpoch]);
   const activeListFilterSummary = React.useMemo(() => {
     const parts: string[] = [];
     if (readStatusFilterActive) parts.push(readStatusFilterLabel(readStatusFilter));
@@ -3569,12 +3565,13 @@ export default function InboxWorkspace() {
     const matchFromMessage = (msg: MailDraft | MailSent | MailInbound) => {
       if ("updatedAt" in msg) return null;
       const mid = "uid" in msg ? `${account.id}:in:${msg.id}` : msg.id;
+      const cachedLead = (id: string) => leadById.get(id) ?? peekCrmEntity("leads", id) ?? null;
       const manuallyLinked = linkedLeadByMessageId[mid];
-      if (manuallyLinked) return leadById.get(manuallyLinked) ?? null;
+      if (manuallyLinked) return cachedLead(manuallyLinked);
       const emails = collectMessageEmails(msg);
       for (const e of emails) {
         const id = emailToLeadId.get(e);
-        if (id) return leadById.get(id) ?? null;
+        if (id) return cachedLead(id);
       }
       return null;
     };
@@ -3596,6 +3593,7 @@ export default function InboxWorkspace() {
     linkedLeadByMessageId,
     emailToLeadId,
     leadById,
+    leadCacheEpoch,
   ]);
 
   async function generateAiReply() {
@@ -6039,7 +6037,8 @@ function resolveLeadForMailListRow(
   emailToLeadId?: Map<string, string>,
   leadById?: Map<string, Lead>,
 ): Lead | null {
-  const byId = (id: string) => leadById?.get(id) ?? leads.find((l) => l.id === id) ?? null;
+  const byId = (id: string) =>
+    leadById?.get(id) ?? leads.find((l) => l.id === id) ?? peekCrmEntity("leads", id) ?? null;
   const contactFor = (lead: Lead) =>
     lead.contactId ? contacts.find((c) => c.id === lead.contactId) : undefined;
 

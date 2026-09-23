@@ -32,6 +32,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { KpiCard } from "@/components/common/kpi-card";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useRememberLeadsByIds } from "@/hooks/use-snapshot-crm";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { fmtRelative } from "@/lib/format";
@@ -248,6 +250,7 @@ export default function FollowupsPage() {
     () => filterFollowupsByOwnerScope(allFollowups, ownerScope, ownerScopeDeps),
     [allFollowups, ownerScope, ownerScopeDeps],
   );
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
 
   const followupLeadChannel = React.useCallback(
     (f: Followup) =>
@@ -384,6 +387,21 @@ export default function FollowupsPage() {
       ),
     [timedOpen, viewDateYmd, timeZone],
   );
+
+  const visibleFollowupLeadIds = React.useMemo(() => {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const row of [...failed, ...overdue, ...today, ...thisWeek, ...later, ...doneVisible]) {
+      const id = row.leadId?.trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    return ids;
+  }, [failed, overdue, today, thisWeek, later, doneVisible]);
+  const leadHydration = useRememberLeadsByIds(visibleFollowupLeadIds, snapshotOff, {
+    hydrateAll: true,
+  });
 
   // KPI overdue includes failed sends that are also past due, so counts stay familiar.
   const overdueKpiCount = React.useMemo(
@@ -995,6 +1013,11 @@ export default function FollowupsPage() {
         }
       />
       <PageBody className={cn(selectedIds.size > 0 && tab === "open" && "pb-24")}>
+        {snapshotOff && leadHydration.error ? (
+          <p className="mb-3 text-xs text-destructive">
+            Some lead names could not be loaded. Refresh the page to try again.
+          </p>
+        ) : null}
         {!followupsReady ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && allFollowups.length === 0 ? (

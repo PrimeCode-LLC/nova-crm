@@ -3,6 +3,8 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { resolveLeadIdsByEmailClient } from "@/lib/crm-dedupe-client";
 import {
   detectHardBounce,
   isDeliveryStatusNotification,
@@ -203,6 +205,14 @@ export function EmailBounceWatcher() {
             if (contact) {
               leadIdHint = leads.find((l) => l.contactId === contact.id)?.id;
             }
+          }
+          if (
+            !leadIdHint &&
+            isLiveCrmSnapshotDisabled(isDemo) &&
+            bounce.failedRecipients.length > 0
+          ) {
+            const byEmail = await resolveLeadIdsByEmailClient(bounce.failedRecipients);
+            leadIdHint = Object.values(byEmail)[0];
           }
 
           const url = appendMailDataOwnerParam(

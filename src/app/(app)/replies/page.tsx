@@ -23,6 +23,10 @@ import {
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { useCrmEntityTotals } from "@/hooks/use-snapshot-crm";
+import { CrmListLoadMore } from "@/components/common/crm-list-load-more";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { getDashboardRangeStart } from "@/lib/dashboard-date-range";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import {
   DASHBOARD_TIME_RANGE_LABELS,
@@ -48,24 +52,30 @@ function RepliesPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { leads: wsLeads, isDemo, workspaceLoading } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const entityTotals = useCrmEntityTotals(snapshotOff);
+  const timeZone = useOrgTimezone();
+  const range = parseDashboardTimeRangeKey(searchParams.get("range"), "30d");
+  const reviewOnly = searchParams.get("review") === "pending";
+  const repliedSince = React.useMemo(
+    () => getDashboardRangeStart(range, { timeZone }).toISOString(),
+    [range, timeZone],
+  );
   const crmPages = useCrmEntityPages({
     entity: "leads",
     enabled: !isDemo,
-    drain: true,
+    drain: !snapshotOff,
+    filters: snapshotOff ? { repliedSince } : undefined,
   });
   const leads = React.useMemo(() => {
     if (crmPages.enabled) return crmPages.items as typeof wsLeads;
     return wsLeads;
   }, [crmPages.enabled, crmPages.items, wsLeads]);
   const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
-  const timeZone = useOrgTimezone();
-
-  const range = parseDashboardTimeRangeKey(searchParams.get("range"), "30d");
-  const reviewOnly = searchParams.get("review") === "pending";
 
   const replied = React.useMemo(
-    () => listLeadsRepliedInRange(leads, range, { timeZone }),
-    [leads, range, timeZone],
+    () => (snapshotOff ? leads : listLeadsRepliedInRange(leads, range, { timeZone })),
+    [snapshotOff, leads, range, timeZone],
   );
 
   const visible = React.useMemo(
@@ -124,7 +134,11 @@ function RepliesPageInner() {
       <PageBody contained>
         {listLoading ? (
           <WorkspacePageSkeleton />
-        ) : !isDemo && replied.length === 0 && leads.length === 0 ? (
+        ) : !isDemo &&
+          replied.length === 0 &&
+          (snapshotOff
+            ? entityTotals.isSuccess && (entityTotals.data?.leads ?? 0) === 0
+            : leads.length === 0) ? (
           <WorkspaceEmptyHint title="No replies yet" description="Inbound replies will show up here." />
         ) : (
           <div className="space-y-4">
@@ -218,6 +232,12 @@ function RepliesPageInner() {
             )}
           </div>
         )}
+        {snapshotOff ? (
+          <CrmListLoadMore
+            hasMore={crmPages.hasNextPage}
+            onLoadMore={() => void crmPages.fetchNextPage()}
+          />
+        ) : null}
       </PageBody>
     </AppPage>
   );

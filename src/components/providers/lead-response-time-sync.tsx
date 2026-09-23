@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import {
   computeLeadFirstOutboundResponseMinutes,
@@ -17,11 +18,13 @@ const MAX_PATCHES_PER_TICK = 8;
  * Capped per tick to avoid hanging the UI with dozens of concurrent patches.
  */
 export function LeadResponseTimeSync() {
-  const { leads, patchLead } = useWorkspace();
+  const { leads, patchLead, isDemo } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
   const emailCtx = useLeadEmailResponseContext();
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
+    if (snapshotOff) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
@@ -40,7 +43,7 @@ export function LeadResponseTimeSync() {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [leads, emailCtx, patchLead]);
+  }, [leads, emailCtx, patchLead, snapshotOff]);
 
   return null;
 }

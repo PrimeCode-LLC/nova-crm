@@ -41,6 +41,7 @@ export function FrontlineBoard({
   wonDealCount,
   avgResponseMin,
   isDemo,
+  narrowLists = true,
 }: {
   role: Role | undefined;
   metrics: DashboardWorkflowMetrics;
@@ -57,6 +58,8 @@ export function FrontlineBoard({
   wonDealCount: number;
   avgResponseMin: number | null;
   isDemo?: boolean;
+  /** Frontline viewers are member-scoped unless the page says otherwise. */
+  narrowLists?: boolean;
 }) {
   const isProspecting = role === "prospecting" || role === "data_scraper";
   const focus = pulseFocusForRole(role);
@@ -237,6 +240,7 @@ export function FrontlineBoard({
               plans={plans}
               tasks={tasks}
               currentUserId={currentUserId}
+              narrow={narrowLists}
             />
           ) : null}
         </div>

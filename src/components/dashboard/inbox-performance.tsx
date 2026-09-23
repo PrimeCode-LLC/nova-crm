@@ -9,6 +9,11 @@ import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { useOpsScoreboards } from "@/hooks/use-ops-scoreboards";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import {
+  inMemoryLeadScanUnavailable,
+  SNAPSHOT_LEAD_SCAN_EMPTY_COPY,
+} from "@/lib/dashboard-kpi-v2-flags";
 import { fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Followup, Lead, User } from "@/lib/types";
@@ -30,12 +35,17 @@ export function InboxPerformance({
   orgWideScope?: boolean;
 }) {
   const timeZone = useOrgTimezone();
+  const { isDemo } = useWorkspace();
   const scoreboards = useOpsScoreboards({ range, orgWideScope });
   const limit = wall ? 6 : 10;
+  const leadScanOff =
+    inMemoryLeadScanUnavailable(isDemo, leads.length) &&
+    !(scoreboards.enabled && (scoreboards.payload?.inbox?.length ?? 0) > 0);
   const rows = React.useMemo(() => {
     if (scoreboards.enabled && (scoreboards.payload?.inbox?.length ?? 0) > 0) {
       return scoreboards.payload!.inbox.slice(0, limit);
     }
+    if (leadScanOff) return [];
     return buildInboxPerformanceRows({
       users,
       leads,
@@ -45,6 +55,7 @@ export function InboxPerformance({
       limit,
     });
   }, [
+    leadScanOff,
     scoreboards.enabled,
     scoreboards.payload,
     users,
@@ -68,7 +79,9 @@ export function InboxPerformance({
       </CardHeader>
       <CardContent className="pt-0">
         {rows.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">No outreach in this range yet.</p>
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            {leadScanOff ? SNAPSHOT_LEAD_SCAN_EMPTY_COPY : "No outreach in this range yet."}
+          </p>
         ) : (
           <Table>
             <TableHeader>

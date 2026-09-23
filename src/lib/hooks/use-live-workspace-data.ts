@@ -16,6 +16,7 @@ import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import {
   isDashboardKpiApiV2Enabled,
   isWorkspaceCrmPollV2Enabled,
+  isWorkspaceCrmSnapshotOff,
 } from "@/lib/dashboard-kpi-v2-flags";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
@@ -632,7 +633,11 @@ export function useLiveWorkspaceFirestore(
       };
       const load = async () => {
         try {
+          const skipCrmSnapshot = isWorkspaceCrmSnapshotOff();
           if (pgLeads) {
+            if (skipCrmSnapshot) {
+              applyPg("leads", "leads", []);
+            } else {
             const res = await fetch(
               `/api/org/leads?narrow=${memberScope ? "1" : "0"}&all=1`,
               { credentials: "same-origin", cache: "no-store" },
@@ -647,10 +652,16 @@ export function useLiveWorkspaceFirestore(
               throw new Error(json.error || `Leads API failed (${res.status})`);
             }
             applyPg("leads", "leads", Array.isArray(json.leads) ? json.leads : []);
+            }
           } else {
             applyPg("leads", "leads", []);
           }
           if (pgCrm) {
+            if (skipCrmSnapshot) {
+              applyPg("accounts", null, []);
+              applyPg("contacts", null, []);
+              applyPg("deals", null, []);
+            } else {
             for (const entity of ["accounts", "contacts", "deals"] as const) {
               const res = await fetch(
                 `/api/org/${entity}?narrow=${memberScope ? "1" : "0"}&all=1`,
@@ -668,6 +679,7 @@ export function useLiveWorkspaceFirestore(
               }
               const rows = Array.isArray(json[entity]) ? json[entity] : [];
               applyPg(entity, null, rows as unknown[]);
+            }
             }
           }
 
@@ -748,9 +760,26 @@ export function useLiveWorkspaceFirestore(
             permissionOverrides,
           ] = await Promise.all([
             fetchDocs(COLLECTIONS.users, asUser),
-            fetchDocs(COLLECTIONS.followups, asFollowup),
-            fetchDocs(COLLECTIONS.followupPlans, asFollowupPlan),
-            fetchDocs(COLLECTIONS.leadTasks, asLeadTask),
+            fetchMemberScopedDocs(
+              COLLECTIONS.followups,
+              asFollowup,
+              {},
+              ["ownerId"],
+              ["ownerManagerIds"],
+            ),
+            fetchMemberScopedDocs(
+              COLLECTIONS.followupPlans,
+              asFollowupPlan,
+              {},
+              ["ownerId"],
+              ["ownerManagerIds"],
+            ),
+            fetchMemberScopedDocs(
+              COLLECTIONS.leadTasks,
+              asLeadTask,
+              {},
+              ["assigneeId", "createdById"],
+            ),
             fetchDocs(COLLECTIONS.labels, asCrmLabel),
             fetchDocs(COLLECTIONS.profiles, asProfile),
             fetchDocs(COLLECTIONS.campaigns, asCampaign),
@@ -1170,6 +1199,9 @@ export function useLiveWorkspaceFirestore(
 
         /** P2.10: when flag on, skip Firestore leads listeners and poll Postgres API. */
         if (isPostgresReadLeadsV1Enabled()) {
+          if (isWorkspaceCrmSnapshotOff()) {
+            applySnapshot("leads", "leads", []);
+          } else {
           let cancelled = false;
           let inflight: Promise<void> | null = null;
           const loadLeadsFromPostgres = async () => {
@@ -1219,6 +1251,7 @@ export function useLiveWorkspaceFirestore(
             window.clearInterval(intervalId);
             window.removeEventListener("focus", onFocus);
           });
+          }
         } else {
           const leadSlices = new Map<string, Lead[]>();
           const mergeLeadSlices = () => {
@@ -1376,6 +1409,10 @@ export function useLiveWorkspaceFirestore(
       if (group === "directory") {
         /** P6.1: when flag on, skip Firestore accounts/contacts listeners and poll Postgres APIs. */
         if (isPostgresReadCrmV1Enabled()) {
+          if (isWorkspaceCrmSnapshotOff()) {
+            applySnapshot("accounts", "accounts", []);
+            applySnapshot("contacts", "contacts", []);
+          } else {
           const startCrmPoll = (
             path: string,
             dataKey: "accounts" | "contacts",
@@ -1436,6 +1473,7 @@ export function useLiveWorkspaceFirestore(
           startCrmPoll("/api/org/contacts", "contacts", (json) =>
             Array.isArray(json.contacts) ? (json.contacts as Contact[]) : [],
           );
+          }
         } else {
           subscribeOwnedByOwnerOrManager(
             group,
@@ -1467,6 +1505,9 @@ export function useLiveWorkspaceFirestore(
 
       if (group === "deals") {
         if (isPostgresReadCrmV1Enabled()) {
+          if (isWorkspaceCrmSnapshotOff()) {
+            applySnapshot("deals", "deals", []);
+          } else {
           let cancelled = false;
           let inflight: Promise<void> | null = null;
           const loadDealsFromPostgres = async () => {
@@ -1516,6 +1557,7 @@ export function useLiveWorkspaceFirestore(
             window.clearInterval(intervalId);
             window.removeEventListener("focus", onFocus);
           });
+          }
         } else {
           subscribeOwnedByOwnerOrManager(
             group,

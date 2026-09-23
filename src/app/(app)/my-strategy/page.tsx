@@ -25,6 +25,8 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { findStrategyDayProgress, useStrategyDayProgress } from "@/hooks/use-snapshot-crm";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import {
   activeAssignmentsForUser,
@@ -285,6 +287,9 @@ export default function MyStrategyPage() {
   const data = useProspectingStrategyData();
   const quickAdd = useOpenQuickAdd();
 
+  const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
+  const progressLeads = snapshotOff ? [] : ws.leads;
+
   const myAssignments = React.useMemo(() => {
     const active = activeAssignmentsForUser(data.assignments, ws.currentUserId);
     return [...active].sort((a, b) => {
@@ -303,17 +308,56 @@ export default function MyStrategyPage() {
     ? data.strategies.find((s) => s.id === activeAssignment.strategyId)
     : undefined;
 
-  const dayProgress = React.useMemo(
+  const progressSubjects = React.useMemo(
     () =>
-      countUserDayProgress(
-        ws.leads,
-        ws.currentUserId,
-        ws.intentPlaybook.outreachThreshold,
-        undefined,
-        myAssignments.map((assignment) => assignment.id),
-      ),
-    [ws.leads, ws.currentUserId, ws.intentPlaybook.outreachThreshold, myAssignments],
+      ws.currentUserId
+        ? [
+            {
+              userId: ws.currentUserId,
+              strategyAssignmentIds: myAssignments.map((assignment) => assignment.id),
+            },
+            ...myAssignments.map((assignment) => ({
+              userId: ws.currentUserId,
+              strategyAssignmentIds: [assignment.id],
+            })),
+          ]
+        : [],
+    [ws.currentUserId, myAssignments],
   );
+  const remoteDay = useStrategyDayProgress(
+    snapshotOff,
+    progressSubjects,
+    ws.intentPlaybook.outreachThreshold,
+  );
+  const dayProgress = React.useMemo(() => {
+    const assignmentIds = myAssignments.map((assignment) => assignment.id);
+    if (snapshotOff) {
+      return (
+        findStrategyDayProgress(remoteDay.data?.results, ws.currentUserId, assignmentIds) ??
+        countUserDayProgress(
+          [],
+          ws.currentUserId,
+          ws.intentPlaybook.outreachThreshold,
+          undefined,
+          assignmentIds,
+        )
+      );
+    }
+    return countUserDayProgress(
+      progressLeads,
+      ws.currentUserId,
+      ws.intentPlaybook.outreachThreshold,
+      undefined,
+      assignmentIds,
+    );
+  }, [
+    snapshotOff,
+    remoteDay.data,
+    progressLeads,
+    ws.currentUserId,
+    ws.intentPlaybook.outreachThreshold,
+    myAssignments,
+  ]);
 
   const todayTotal = React.useMemo(() => {
     return myAssignments.reduce((sum, a) => {
@@ -455,7 +499,15 @@ export default function MyStrategyPage() {
                 assignment={activeAssignment}
                 strategy={activeStrategy}
                 personas={data.personas}
-                leads={ws.leads}
+                leads={progressLeads}
+                serverProgress={
+                  snapshotOff
+                    ? findStrategyDayProgress(remoteDay.data?.results, ws.currentUserId, [
+                        activeAssignment.id,
+                      ])
+                    : undefined
+                }
+                progressTruncated={snapshotOff && remoteDay.data?.truncated === true}
                 userId={ws.currentUserId}
                 outreachThreshold={ws.intentPlaybook.outreachThreshold}
                 playbookSignals={ws.intentPlaybook.signals}
@@ -475,6 +527,8 @@ function StrategyWorkbench({
   strategy,
   personas,
   leads,
+  serverProgress,
+  progressTruncated,
   userId,
   outreachThreshold,
   playbookSignals,
@@ -485,6 +539,8 @@ function StrategyWorkbench({
   strategy: ProspectingStrategy;
   personas: BuyerPersona[];
   leads: ReturnType<typeof useWorkspace>["leads"];
+  serverProgress?: ReturnType<typeof countStrategyDayProgress>;
+  progressTruncated?: boolean;
   userId: string;
   outreachThreshold: number;
   playbookSignals: { id: string; label: string; points: number; category: string }[];
@@ -495,13 +551,15 @@ function StrategyWorkbench({
   const allocated = allocatedDailyTarget(assignment, strategy.dailyTargetDefault);
   const source = dailyTargetSource(assignment, strategy.dailyTargetDefault);
   const baseTarget = effectiveDailyTarget(assignment, strategy.dailyTargetDefault);
-  const progress = countStrategyDayProgress({
-    leads,
-    userId,
-    strategyId: strategy.id,
-    strategyAssignmentId: assignment.id,
-    outreachThreshold,
-  });
+  const progress =
+    serverProgress ??
+    countStrategyDayProgress({
+      leads,
+      userId,
+      strategyId: strategy.id,
+      strategyAssignmentId: assignment.id,
+      outreachThreshold,
+    });
   const targetRows = progressAgainstTargets(progress, targetsForStrategy(strategy));
 
   const personaIds = assignment.personaIdsOverride?.length
@@ -574,6 +632,9 @@ function StrategyWorkbench({
                 {allocated}
               </span>
               {multiStrategy ? ` of ${baseTarget} base` : ""} - {targetSourceLabel(source)}
+              {progressTruncated
+                ? " Today's count hit the safety cap and may be short."
+                : ""}
             </CardDescription>
           </div>
           <Button size="sm" type="button" className="shrink-0" onClick={onStart}>

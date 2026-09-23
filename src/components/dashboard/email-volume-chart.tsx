@@ -6,6 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { useChartSize } from "@/hooks/use-chart-size";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { inMemoryLeadScanUnavailable } from "@/lib/dashboard-kpi-v2-flags";
 import {
   buildEmailVolumeSeries,
   emailVolumeTotals,
@@ -46,7 +48,9 @@ export function EmailVolumeChart({
   timeZone?: string;
 }) {
   const orgTimeZone = useOrgTimezone();
+  const { isDemo } = useWorkspace();
   const timeZone = timeZoneProp ?? orgTimeZone;
+  const opensNeedLeadList = inMemoryLeadScanUnavailable(isDemo, leads.length);
   const [period, setPeriod] = React.useState<EmailVolumePeriod>("week");
   // Defer heavy bucketing so KPI strip / pulse stay responsive while followups sync in.
   const deferredFollowups = React.useDeferredValue(followups);
@@ -88,9 +92,11 @@ export function EmailVolumeChart({
           <div>
             <CardTitle className="text-sm font-semibold">Email volume</CardTitle>
             <CardDescription className="text-xs">
-              Sent · opens · replies · bounces · {fmtNumber(totals.sent)} sent ·{" "}
-              {fmtNumber(totals.opens)} opened · {fmtNumber(totals.replies)} replies ·{" "}
-              {fmtNumber(totals.bounces)} bounced
+              {opensNeedLeadList
+                ? "Sent counts use follow-ups. Opens and replies need the lead list or a scoreboard. "
+                : "Sent · opens · replies · bounces · "}
+              {fmtNumber(totals.sent)} sent · {fmtNumber(totals.opens)} opened ·{" "}
+              {fmtNumber(totals.replies)} replies · {fmtNumber(totals.bounces)} bounced
             </CardDescription>
           </div>
           {!compact ? (

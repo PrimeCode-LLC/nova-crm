@@ -31,6 +31,8 @@ import {
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { useOrgMembers } from "@/hooks/use-org-members";
 import {
   createUserNotifications,
@@ -140,7 +142,7 @@ import { LeadSourceButton, LeadScraperSourceSummary } from "@/components/leads/l
 import { ProspectChannelPanel } from "@/components/prospects/prospect-channel-panel";
 import { ProspectIntakeDialog } from "@/components/leads/prospect-intake-dialog";
 import { LeadAnalyzeDialog } from "@/components/ai/lead-analyze-dialog";
-import type { Lead, OrganizationMember, PipelineStage, User } from "@/lib/types";
+import type { Deal, Lead, OrganizationMember, PipelineStage, User } from "@/lib/types";
 import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib/lead-task-visibility";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
@@ -358,6 +360,29 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   ]);
 
   const lead = leadFromWorkspace ?? hydratedLead ?? undefined;
+  const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
+  const relatedOn = snapshotOff && !ws.isDemo;
+  const dealPages = useCrmEntityPages({
+    entity: "deals",
+    enabled: relatedOn,
+    limit: 5,
+    filters: { leadId },
+  });
+  const siblingLeadPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: relatedOn && Boolean(lead?.accountId),
+    limit: 20,
+    filters: {
+      accountId: lead?.accountId,
+      contactId: lead?.contactId,
+    },
+  });
+  const prospectPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: relatedOn && Boolean(lead?.prospectSourceId?.trim()),
+    limit: 1,
+    filters: { ids: lead?.prospectSourceId?.trim() ? [lead.prospectSourceId.trim()] : undefined },
+  });
   const backHref =
     backFrom === "pipeline"
       ? "/pipeline"
@@ -379,11 +404,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     if (!lead) return undefined;
     return buildChannelTagTooltipMap(
       lead,
-      ws.leads,
+      relatedOn ? [...(prospectPages.items as Lead[]), ...ws.leads] : ws.leads,
       ws.getOwnerDisplayName,
       (ch) => channelLabelFromValue(ch, channelOptions) || ch,
     );
-  }, [lead, ws.leads, ws.getOwnerDisplayName, channelOptions]);
+  }, [lead, ws.leads, ws.getOwnerDisplayName, channelOptions, relatedOn, prospectPages.items]);
 
   const viewerForTasks = React.useMemo(
     () => workspaceViewerForLeadTasks(ws.getUserById, ws.currentUserId),
@@ -546,7 +571,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       lead,
       account: ws.getAccountById(lead.accountId),
       contact: ws.getContactById(lead.contactId),
-      deal: ws.deals.find((d) => d.leadId === lead.id),
+      deal: (relatedOn ? (dealPages.items as Deal[]) : ws.deals).find((d) => d.leadId === lead.id),
       notes: ws.notes.filter((n) => n.leadId === lead.id),
       timeline: ws.timelineByLead[lead.id] ?? [],
       touchpoints: ws.touchpoints.filter((t) => t.leadId === lead.id),
@@ -568,6 +593,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     relatedEmailThreads,
     viewerForTasks,
     ws,
+    relatedOn,
+    dealPages.items,
   ]);
 
   const fallbackOwnerOptions = React.useMemo(
@@ -647,7 +674,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const resolvedLead = lead;
   const canEditLead = ws.canEditLead(lead);
   const prospectSourceId = lead.prospectSourceId?.trim();
-  const linkedSourceProspect = ws.leads.find(
+  const linkedSourceProspect = (relatedOn ? (siblingLeadPages.items as Lead[]) : ws.leads).find(
     (candidate) =>
       candidate.id !== lead.id &&
       (candidate.linkedSalesLeadId?.trim() === lead.id ||
@@ -665,7 +692,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         : linkedSourceProspect ?? (backFrom === "prospects" ? lead : undefined);
   const account = ws.getAccountById(lead.accountId);
   const contact = ws.getContactById(lead.contactId);
-  const deal = ws.deals.find((d) => d.leadId === lead.id);
+  const deal = (relatedOn ? (dealPages.items as Deal[]) : ws.deals).find((d) => d.leadId === lead.id);
   const moveBackMode = moveBackModeFor(lead);
   const moveBackBlocked = moveBackMode
     ? moveBackBlockedReason(lead, { hasDeal: Boolean(deal) })

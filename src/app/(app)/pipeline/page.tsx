@@ -15,6 +15,9 @@ import { PRIORITY_TONE } from "@/lib/constants";
 import type { LeadPriority } from "@/lib/types";
 import { filterActiveLeads } from "@/lib/leads/lead-archive";
 import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { useKanbanStagePages } from "@/hooks/use-kanban-stage-pages";
+import { CrmListLoadMore } from "@/components/common/crm-list-load-more";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -34,19 +37,24 @@ const KanbanBoard = dynamic(
 
 export default function PipelinePage() {
   const { leads: wsLeads, isDemo, workspaceLoading } = useWorkspace();
-  const crmPages = useCrmEntityPages({
-    entity: "leads",
-    enabled: !isDemo,
-    drain: true,
-  });
-  const leads = React.useMemo(() => {
-    if (crmPages.enabled) return crmPages.items as typeof wsLeads;
-    return wsLeads;
-  }, [crmPages.enabled, crmPages.items, wsLeads]);
-  const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
-  const { openQuickAdd } = useOpenQuickAdd();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
   const [boardQuery, setBoardQuery] = React.useState("");
   const [priorityFilter, setPriorityFilter] = React.useState<LeadPriority[]>([]);
+  const crmPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: !isDemo && !snapshotOff,
+    drain: true,
+  });
+  const kanbanPages = useKanbanStagePages(snapshotOff, boardQuery);
+  const leads = React.useMemo(() => {
+    if (snapshotOff) return kanbanPages.leads as typeof wsLeads;
+    if (crmPages.enabled) return crmPages.items as typeof wsLeads;
+    return wsLeads;
+  }, [snapshotOff, kanbanPages.leads, crmPages.enabled, crmPages.items, wsLeads]);
+  const listLoading =
+    workspaceLoading ||
+    (snapshotOff ? kanbanPages.loading : crmPages.enabled && crmPages.loading);
+  const { openQuickAdd } = useOpenQuickAdd();
 
   const activeLeads = React.useMemo(() => filterActiveLeads(leads), [leads]);
 
@@ -144,12 +152,15 @@ export default function PipelinePage() {
         ) : (
           <KanbanBoard
             leads={activeLeads}
-            boardFilter={{ query: boardQuery, priorities: priorityFilter }}
+            boardFilter={{ query: snapshotOff ? "" : boardQuery, priorities: priorityFilter }}
             onAddToStage={(stage) =>
               openQuickAdd({ initialPill: "lead", initialLeadStage: stage })
             }
           />
         )}
+        {snapshotOff ? (
+          <CrmListLoadMore hasMore={kanbanPages.hasMore} onLoadMore={() => void kanbanPages.loadMore()} />
+        ) : null}
       </PageBody>
     </>
   );

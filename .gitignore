@@ -55,6 +55,13 @@ next-env.d.ts
 # Prisma Client (generated via postinstall / db:generate)
 /src/generated/prisma
 
+# Graphify (local-only — rebuild with npm run graphify:build)
+/graphify-out/
+/.graphifyignore
+/.gitattributes
+/.claude/settings.json
+/.cursor/rules/graphify.mdc
+
 # P6.3 Firestore export archives (may contain tenant PII — never commit)
 /archives/
 

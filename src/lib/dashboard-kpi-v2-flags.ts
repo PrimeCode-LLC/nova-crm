@@ -35,5 +35,32 @@ export function isWorkspaceCrmPollV2Enabled(): boolean {
   );
 }
 
+export const WORKSPACE_CRM_SNAPSHOT_OFF_FLAG = "workspace_crm_snapshot_off" as const;
+
+/**
+ * Stop the live `all=1` CRM snapshot poll. Default off — the full snapshot
+ * remains the rollback path. Demo mode must ignore this flag (callers pass `isDemo`).
+ * Independent of `WORKSPACE_CRM_POLL_V2`.
+ */
+export function isWorkspaceCrmSnapshotOff(): boolean {
+  return (
+    process.env.WORKSPACE_CRM_SNAPSHOT_OFF === "true" ||
+    process.env.NEXT_PUBLIC_WORKSPACE_CRM_SNAPSHOT_OFF === "true"
+  );
+}
+
+/** Live sessions only. Demo keeps its in-memory fixture snapshot. */
+export function isLiveCrmSnapshotDisabled(isDemo: boolean): boolean {
+  return !isDemo && isWorkspaceCrmSnapshotOff();
+}
+
+/** True when widgets must not treat an empty `ws.leads` array as a real zero. */
+export function inMemoryLeadScanUnavailable(isDemo: boolean, leadCount: number): boolean {
+  return isLiveCrmSnapshotDisabled(isDemo) && leadCount === 0;
+}
+
+export const SNAPSHOT_LEAD_SCAN_EMPTY_COPY =
+  "These totals need ops scoreboards while the full lead list is turned off.";
+
 /** Server totals for list pages: GET `/api/org/crm-counts` (tenant + role-derived narrow). */
 export const CRM_COUNTS_API_PATH = "/api/org/crm-counts" as const;

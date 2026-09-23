@@ -23,6 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { findContactByEmail } from "@/lib/crm-dedupe";
 import { fetchCrmDedupeClient } from "@/lib/crm-dedupe-client";
 import { openBounceReviewTasksForLead } from "@/lib/email/contact-email-change";
@@ -64,7 +66,18 @@ export function SwitchLeadContactDialog({
   onResumeSequence?: (to: string) => Promise<void>;
 }) {
   const ws = useWorkspace();
-  const siblings = siblingContactsOnAccount(ws.contacts, lead.accountId, lead.contactId);
+  const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
+  const siblingPages = useCrmEntityPages({
+    entity: "contacts",
+    enabled: snapshotOff && open,
+    limit: 50,
+    filters: { accountId: lead.accountId },
+  });
+  const siblings = siblingContactsOnAccount(
+    snapshotOff ? (siblingPages.items as typeof ws.contacts) : ws.contacts,
+    lead.accountId,
+    lead.contactId,
+  );
 
   const [mode, setMode] = React.useState<Mode>("pick");
   const [selectedId, setSelectedId] = React.useState<string>("");

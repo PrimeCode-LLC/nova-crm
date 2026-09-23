@@ -271,10 +271,17 @@ function leadVisible(id: string | undefined, visible: Set<string>): boolean {
   return visible.has(id);
 }
 
-/** Merges session-layer edits into an already persona-scoped workspace snapshot. */
+/**
+ * Merges session-layer edits into an already persona-scoped workspace snapshot.
+ * `keepUnloadedLeadLinks` is for the live snapshot cutover: lead rows are not in
+ * memory, so document rows (followups, notes, tasks) must not be dropped just
+ * because their lead id is absent from the empty lead array. Flag off and demo
+ * leave this false so the existing visibility filter stays.
+ */
 export function mergeSessionIntoSnapshot(
   base: WorkspaceSnapshot,
   session: WorkspaceSessionV2,
+  options?: { keepUnloadedLeadLinks?: boolean },
 ): Pick<
   WorkspaceSnapshot,
   | "followups"
@@ -290,6 +297,7 @@ export function mergeSessionIntoSnapshot(
   | "deals"
 > {
   const deletedLeadIds = new Set(session.deletedLeadIds ?? []);
+  const keepUnloadedLeadLinks = options?.keepUnloadedLeadLinks === true;
 
   const leads = base.leads
     .filter((l) => !deletedLeadIds.has(l.id))
@@ -312,8 +320,14 @@ export function mergeSessionIntoSnapshot(
   });
 
   const visibleLeadIds = new Set(leads.map((l) => l.id));
+  const linkedLeadLoaded = (leadId: string | null | undefined) =>
+    keepUnloadedLeadLinks || !leadId || visibleLeadIds.has(leadId);
+  const requiredLeadLoaded = (leadId: string | null | undefined) =>
+    keepUnloadedLeadLinks || leadVisible(leadId ?? undefined, visibleLeadIds);
   const visibleDealIds = new Set(
-    base.deals.filter((d) => visibleLeadIds.has(d.leadId)).map((d) => d.id),
+    base.deals
+      .filter((d) => requiredLeadLoaded(d.leadId))
+      .map((d) => d.id),
   );
 
   const removedNotes = new Set(session.notes.removedIds);
@@ -323,30 +337,32 @@ export function mergeSessionIntoSnapshot(
       const u = session.notes.updates[n.id];
       return u ? { ...n, ...u } : n;
     })
-    .filter((n) => !n.leadId || visibleLeadIds.has(n.leadId));
+    .filter((n) => linkedLeadLoaded(n.leadId));
   const baseNoteIds = new Set(mergedBaseNotes.map((n) => n.id));
   const notes = [
     ...mergedBaseNotes,
     ...session.notes.added.filter(
-      (n) => leadVisible(n.leadId, visibleLeadIds) && !baseNoteIds.has(n.id),
+      (n) =>
+        (keepUnloadedLeadLinks || leadVisible(n.leadId, visibleLeadIds)) &&
+        !baseNoteIds.has(n.id),
     ),
   ];
 
   const baseTouchpointIds = new Set(base.touchpoints.map((t) => t.id));
   const touchpoints = [
-    ...base.touchpoints.filter((t) => visibleLeadIds.has(t.leadId)),
+    ...base.touchpoints.filter((t) => requiredLeadLoaded(t.leadId)),
     ...session.touchpointsAdded.filter(
-      (t) => visibleLeadIds.has(t.leadId) && !baseTouchpointIds.has(t.id),
+      (t) => requiredLeadLoaded(t.leadId) && !baseTouchpointIds.has(t.id),
     ),
   ];
 
   const timelineByLead: Record<string, TimelineEvent[]> = {};
   for (const [leadId, events] of Object.entries(base.timelineByLead)) {
-    if (!visibleLeadIds.has(leadId)) continue;
+    if (!requiredLeadLoaded(leadId)) continue;
     timelineByLead[leadId] = [...events];
   }
   for (const e of session.timelineAdded) {
-    if (!visibleLeadIds.has(e.leadId)) continue;
+    if (!requiredLeadLoaded(e.leadId)) continue;
     const list = timelineByLead[e.leadId] ? [...timelineByLead[e.leadId]] : [];
     if (list.some((x) => x.id === e.id)) continue;
     list.push(e);
@@ -355,7 +371,7 @@ export function mergeSessionIntoSnapshot(
   }
 
   const mergedBaseFollowups = base.followups
-    .filter((f) => !f.leadId || visibleLeadIds.has(f.leadId))
+    .filter((f) => linkedLeadLoaded(f.leadId))
     .map((f) =>
       mergeFollowup(
         f,
@@ -370,7 +386,8 @@ export function mergeSessionIntoSnapshot(
     .filter(
       (f) =>
         !baseFollowupIds.has(f.id) &&
-        ((f.leadId == null && f.dealId == null) ||
+        (keepUnloadedLeadLinks ||
+          (f.leadId == null && f.dealId == null) ||
           (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
           (f.dealId != null && visibleDealIds.has(f.dealId))),
     )
@@ -386,16 +403,16 @@ export function mergeSessionIntoSnapshot(
   const followups = [...mergedBaseFollowups, ...mergedExtras];
 
   const mergedBasePlans = (base.followupPlans ?? [])
-    .filter((p) => visibleLeadIds.has(p.leadId))
+    .filter((p) => requiredLeadLoaded(p.leadId))
     .map((p) => mergeFollowupPlan(p, session.followupPlans.patches));
   const basePlanIds = new Set(mergedBasePlans.map((p) => p.id));
   const planExtras = session.followupPlans.extras
-    .filter((p) => visibleLeadIds.has(p.leadId) && !basePlanIds.has(p.id))
+    .filter((p) => requiredLeadLoaded(p.leadId) && !basePlanIds.has(p.id))
     .map((p) => mergeFollowupPlan(p, session.followupPlans.patches));
   const followupPlans = [...mergedBasePlans, ...planExtras];
 
   const mergedBaseLeadTasks = base.leadTasks
-    .filter((t) => !t.leadId || visibleLeadIds.has(t.leadId))
+    .filter((t) => linkedLeadLoaded(t.leadId))
     .map((t) => mergeLeadTask(t, session.leadTasks.completion));
   const baseLeadTaskIds = new Set(mergedBaseLeadTasks.map((t) => t.id));
   const leadTaskExtrasFiltered = session.leadTasks.extras
@@ -404,7 +421,7 @@ export function mergeSessionIntoSnapshot(
   const leadTasks = [...mergedBaseLeadTasks, ...leadTaskExtrasFiltered];
 
   const deals = base.deals
-    .filter((d) => visibleLeadIds.has(d.leadId))
+    .filter((d) => requiredLeadLoaded(d.leadId))
     .map((d) => {
       const p = session.dealPatches[d.id];
       return p ? { ...d, ...p } : d;

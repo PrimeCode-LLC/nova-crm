@@ -36,6 +36,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmLeadCountsByOwner } from "@/hooks/use-snapshot-crm";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
@@ -113,6 +115,7 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
   const team = departments.find((candidate) => candidate.id === teamId);
   const viewer = getUserById(currentUserId);
   const canEdit = canManageOrgHierarchy(viewer);
+  const ownerCounts = useCrmLeadCountsByOwner(isLiveCrmSnapshotDisabled(mode === "demo"));
 
   const [addOpen, setAddOpen] = React.useState(false);
   const [busyUserId, setBusyUserId] = React.useState<string | null>(null);
@@ -142,8 +145,11 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
 
   const leadCount = React.useMemo(() => {
     const ownerIds = new Set(members.map((u) => u.id));
+    if (isLiveCrmSnapshotDisabled(mode === "demo")) {
+      return [...ownerIds].reduce((sum, id) => sum + (ownerCounts.data?.[id] ?? 0), 0);
+    }
     return leads.filter((l) => ownerIds.has(l.ownerId)).length;
-  }, [leads, members]);
+  }, [leads, members, mode, ownerCounts.data]);
 
   const departmentNameById = React.useMemo(() => {
     const map = new Map<string, string>();

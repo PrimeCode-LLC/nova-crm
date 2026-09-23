@@ -241,6 +241,7 @@ jobs:
             NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
             NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
             NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
+            NEXT_PUBLIC_WORKSPACE_CRM_SNAPSHOT_OFF=true
 
   # Continuous delivery: a green push to feature/remove-firebase deploys the exact
   # SHA whose images publish-ghcr just pushed. `environment: production` is required

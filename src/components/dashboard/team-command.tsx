@@ -21,6 +21,10 @@ import {
   type TeamCommandTimeRangeKey,
 } from "@/lib/dashboard-date-range";
 import { useOpsScoreboards } from "@/hooks/use-ops-scoreboards";
+import {
+  inMemoryLeadScanUnavailable,
+  SNAPSHOT_LEAD_SCAN_EMPTY_COPY,
+} from "@/lib/dashboard-kpi-v2-flags";
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
@@ -248,12 +252,17 @@ export function TeamCommand({
     viewer?.roleId === "team_lead" ||
     viewerHasElevatedWorkspaceRole(viewer);
 
+  const leadScanOff =
+    inMemoryLeadScanUnavailable(ws.isDemo, leads.length) &&
+    !(scoreboards.enabled && (scoreboards.payload?.teamCommand?.length ?? 0) > 0);
+
   const rowsAll = React.useMemo(() => {
     // Empty [] is truthy — only prefer precomputed rows when they have data.
     const precomputed = scoreboards.payload?.teamCommand;
     if (scoreboards.enabled && precomputed && precomputed.length > 0) {
       return precomputed;
     }
+    if (leadScanOff) return [];
     return buildTeamCommandRows({
       users,
       leads,
@@ -265,6 +274,7 @@ export function TeamCommand({
       timeZone,
     });
   }, [
+    leadScanOff,
     scoreboards.enabled,
     scoreboards.payload,
     users,
@@ -326,7 +336,9 @@ export function TeamCommand({
       <CardContent className={cn("pt-0", wall && "min-h-0 flex-1 overflow-y-auto")}>
         {rows.length === 0 ? (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            No scored activity for non-director teammates in this range yet.
+            {leadScanOff
+              ? SNAPSHOT_LEAD_SCAN_EMPTY_COPY
+              : "No scored activity for non-director teammates in this range yet."}
           </p>
         ) : (
           <div className="flex flex-col">

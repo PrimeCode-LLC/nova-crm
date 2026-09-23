@@ -24,11 +24,16 @@ import {
 } from "@/components/ui/table";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { useDealStageSums, useFilteredCrmCount } from "@/hooks/use-snapshot-crm";
+import { openWonDealMoneyFromStageSums } from "@/lib/deals/stage-sum-money";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { REVENUE_RANGES } from "@/lib/constants";
 import { fmtCurrency, fmtRelative, fmtDate } from "@/lib/format";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
+import type { Contact, Deal, Lead } from "@/lib/types";
 import { AddAccountContactDialog } from "@/components/accounts/add-account-contact-dialog";
 import { EditAccountDialog } from "@/components/accounts/edit-account-dialog";
 
@@ -40,6 +45,31 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
     (typeof ws.accounts)[number] | null
   >(null);
   const [fetchDone, setFetchDone] = React.useState(false);
+  const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
+  const relatedOn = snapshotOff && !ws.isDemo;
+  const contactPages = useCrmEntityPages({
+    entity: "contacts",
+    enabled: relatedOn,
+    limit: 50,
+    filters: { accountId },
+  });
+  const leadPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: relatedOn,
+    limit: 50,
+    filters: { accountId },
+  });
+  const dealPages = useCrmEntityPages({
+    entity: "deals",
+    enabled: relatedOn,
+    limit: 50,
+    filters: { accountId },
+  });
+  const contactCount = useFilteredCrmCount("contacts", { accountId }, relatedOn);
+  const leadTotal = useFilteredCrmCount("leads", { accountId }, relatedOn);
+  const wonLeadCount = useFilteredCrmCount("leads", { accountId, stage: "won" }, relatedOn);
+  const lostLeadCount = useFilteredCrmCount("leads", { accountId, stage: "lost" }, relatedOn);
+  const dealStageSums = useDealStageSums(accountId, relatedOn);
   const accountFromWs = ws.accounts.find((a) => a.id === accountId);
   const account = accountFromWs ?? fetchedAccount ?? undefined;
 
@@ -79,11 +109,29 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
     );
   }
 
-  const contacts = ws.contacts.filter((c) => c.accountId === account.id);
-  const leads = ws.leads.filter((l) => l.accountId === account.id);
-  const deals = ws.deals.filter((d) => d.accountId === account.id);
+  const contacts = relatedOn
+    ? (contactPages.items as Contact[])
+    : ws.contacts.filter((c) => c.accountId === account.id);
+  const leads = relatedOn
+    ? (leadPages.items as Lead[])
+    : ws.leads.filter((l) => l.accountId === account.id);
+  const deals = relatedOn
+    ? (dealPages.items as Deal[])
+    : ws.deals.filter((d) => d.accountId === account.id);
   const openDeals = deals.filter((d) => !["won", "lost"].includes(d.stage));
   const wonDeals = deals.filter((d) => d.stage === "won");
+  const stageMoney =
+    relatedOn && dealStageSums.isSuccess
+      ? openWonDealMoneyFromStageSums(dealStageSums.data)
+      : null;
+  const openDealValue = stageMoney
+    ? stageMoney.openSum
+    : openDeals.reduce((s, d) => s + d.value, 0);
+  const openDealCount = stageMoney ? stageMoney.openCount : openDeals.length;
+  const wonDealValue = stageMoney
+    ? stageMoney.wonSum
+    : wonDeals.reduce((s, d) => s + d.value, 0);
+  const wonDealCount = stageMoney ? stageMoney.wonCount : wonDeals.length;
 
   return (
     <>
@@ -140,17 +188,28 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
 
       <PageBody>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <KpiCard label="Contacts" value={contacts.length} icon={Users2} />
-          <KpiCard label="Open leads" value={leads.filter((l) => !["won", "lost"].includes(l.stage)).length} />
+          <KpiCard
+            label="Contacts"
+            value={relatedOn && contactCount.isSuccess ? contactCount.data : contacts.length}
+            icon={Users2}
+          />
+          <KpiCard
+            label="Open leads"
+            value={
+              relatedOn && leadTotal.isSuccess
+                ? Math.max(0, leadTotal.data - (wonLeadCount.data ?? 0) - (lostLeadCount.data ?? 0))
+                : leads.filter((l) => !["won", "lost"].includes(l.stage)).length
+            }
+          />
           <KpiCard
             label="Pipeline"
-            value={fmtCurrency(openDeals.reduce((s, d) => s + d.value, 0))}
-            hint={`${openDeals.length} open deals`}
+            value={fmtCurrency(openDealValue)}
+            hint={`${openDealCount} open deals`}
           />
           <KpiCard
             label="Closed won"
-            value={fmtCurrency(wonDeals.reduce((s, d) => s + d.value, 0))}
-            hint={`${wonDeals.length} deals`}
+            value={fmtCurrency(wonDealValue)}
+            hint={`${wonDealCount} deals`}
           />
         </div>
 

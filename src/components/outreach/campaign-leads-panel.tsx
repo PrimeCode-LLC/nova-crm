@@ -21,6 +21,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
 import { INSTANTLY_MERGE_VARIABLES } from "@/lib/integrations/instantly/lead-mapper";
 import { parseInstantlyId } from "@/lib/integrations/instantly/refs";
 import { importLeadsFromInstantly } from "@/lib/outreach/import-leads-from-instantly";
@@ -46,8 +48,20 @@ export function CampaignLeadsPanel({
   /** From Instantly analytics (total leads in campaign). */
   instantlyLeadCount?: number;
 }) {
-  const { leads, patchLead } = useWorkspace();
+  const { leads, patchLead, isDemo: workspaceDemo } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo || workspaceDemo);
   const [search, setSearch] = React.useState("");
+  const [debouncedSearch, setDebouncedSearch] = React.useState("");
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+  const searchPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: snapshotOff && debouncedSearch.length > 0,
+    limit: 20,
+    filters: { q: debouncedSearch, activeOnly: true },
+  });
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
   const [pushing, setPushing] = React.useState(false);
   const [importing, setImporting] = React.useState(false);
@@ -62,18 +76,19 @@ export function CampaignLeadsPanel({
   );
 
   const eligible = React.useMemo(() => {
+    const source = snapshotOff && debouncedSearch ? (searchPages.items as Lead[]) : leads;
     const q = search.trim().toLowerCase();
-    return leads.filter((l) => {
+    return source.filter((l) => {
       if (l.doNotContact) return false;
       if (!l.contactEmail?.trim()) return false;
-      if (!q) return true;
+      if (!q || (snapshotOff && debouncedSearch)) return true;
       const hay = [l.contactName, l.companyName, l.contactEmail, l.contactTitle]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [leads, search]);
+  }, [leads, search, snapshotOff, debouncedSearch, searchPages.items]);
 
   const selectedIds = React.useMemo(
     () => Object.keys(selected).filter((id) => selected[id] && !enrolledIds.has(id)),

@@ -31,6 +31,9 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import type { Lead } from "@/lib/types";
 import { fmtNumber, fmtPercent, fmtRelative, fmtDate } from "@/lib/format";
 import { campaignReplyRate, campaignOpenRate, campaignBounceRate, instantlyCampaignHref } from "@/lib/campaign-utils";
 import type { Campaign } from "@/lib/types";
@@ -76,6 +79,13 @@ const CAMPAIGN_TABS = ["overview", "sequence", "leads", "accounts", "options"] a
 export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
   const searchParams = useSearchParams();
   const { getCampaignById, leads, isDemo, viewerOrgRole } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const campaignLeadPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: snapshotOff && !isDemo,
+    limit: 50,
+    filters: { campaignId },
+  });
   const c = getCampaignById(campaignId);
   const [syncing, setSyncing] = React.useState(false);
   const [acting, setActing] = React.useState(false);
@@ -125,7 +135,9 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
   const openRate = campaignOpenRate(c);
   const bounceRate = campaignBounceRate(c);
   const instantlyHref = instantlyCampaignHref(c.externalRef);
-  const campaignLeads = leads.filter((l) => l.campaignId === campaignId);
+  const campaignLeads = snapshotOff
+    ? (campaignLeadPages.items as Lead[])
+    : leads.filter((l) => l.campaignId === campaignId);
   const remoteAccounts = accountEmails;
   const canEditAccounts = roleAtLeast(viewerOrgRole, "manager") && (connected || isDemo);
   const schedule = remote?.campaign_schedule?.schedules?.[0];

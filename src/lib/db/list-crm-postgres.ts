@@ -20,6 +20,10 @@ import {
 } from "@/lib/db/crm-list-filters";
 import { countLeadsInPostgres, leadFromPostgresRow } from "@/lib/db/list-leads-postgres";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
+import {
+  mapDealStageGroupSums,
+  type DealStageSum,
+} from "@/lib/deals/stage-sum-money";
 import type { Account, Contact, Deal, Lead, PipelineStage } from "@/lib/types";
 
 /** Default page size for workspace polls / API. */
@@ -229,6 +233,34 @@ export async function countDealsInPostgres(
     ...(scopeParts.length ? { AND: scopeParts } : {}),
   };
   return withOrganizationScope(organizationId, (tx) => tx.deal.count({ where }));
+}
+
+/** Stage sums for the same tenant/member/filter scope as the deals list. No row payload. */
+export async function sumDealsByStageInPostgres(
+  options: Omit<ListCrmPostgresOptions, "cursor" | "limit">,
+): Promise<Record<string, DealStageSum>> {
+  if (!isDatabaseConfigured()) return {};
+  const organizationId = options.organizationId.trim();
+  if (!organizationId) return {};
+  const narrow = Boolean(options.narrowToMember) && Boolean(options.viewerUid?.trim());
+  const filterClause = dealFilterClause(options.filters);
+  const scopeParts: Prisma.DealWhereInput[] = [
+    ...(Object.keys(filterClause).length ? [filterClause] : []),
+    ...(narrow ? [ownedMemberScopeWhere(options.viewerUid!) as Prisma.DealWhereInput] : []),
+  ];
+  const where: Prisma.DealWhereInput = {
+    organizationId,
+    ...(scopeParts.length ? { AND: scopeParts } : {}),
+  };
+  const rows = await withOrganizationScope(organizationId, (tx) =>
+    tx.deal.groupBy({
+      by: ["stage"],
+      where,
+      _sum: { value: true },
+      _count: { _all: true },
+    }),
+  );
+  return mapDealStageGroupSums(rows);
 }
 
 export type CrmEntityCounts = {

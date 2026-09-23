@@ -9,6 +9,10 @@ import { Button } from "@/components/ui/button";
 import { UserChip } from "@/components/common/user-chip";
 import { ActionBoardDetailDialog } from "@/components/dashboard/action-board-detail-dialog";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import { peekCrmEntity } from "@/lib/crm/entity-cache";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { useCachedLeadIds, useRememberLeadsByIds } from "@/hooks/use-snapshot-crm";
 import { buildActionBoard } from "@/lib/dashboard-ops-analytics";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { contactFirstName } from "@/lib/leads/lead-display-label";
@@ -115,11 +119,35 @@ export function ActionBoardPanel({
 }) {
   const [detailOpen, setDetailOpen] = React.useState(false);
   const timeZone = useOrgTimezone();
+  const { isDemo } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const resolveNames = snapshotOff && leads.length === 0;
+  const nameLeadIds = React.useMemo(() => {
+    const ids: string[] = [];
+    for (const task of tasks) if (task.leadId) ids.push(task.leadId);
+    for (const followup of followups) if (followup.leadId) ids.push(followup.leadId);
+    return ids;
+  }, [tasks, followups]);
+  useRememberLeadsByIds(nameLeadIds, resolveNames);
+  const cachedNameIds = useCachedLeadIds(resolveNames ? nameLeadIds : []);
   const board = React.useMemo(
     () => buildActionBoard({ tasks, followups, meetings, timeZone }),
     [tasks, followups, meetings, timeZone],
   );
-  const leadById = React.useMemo(() => new Map(leads.map((lead) => [lead.id, lead])), [leads]);
+  const resolvedLeads = React.useMemo(() => {
+    if (!resolveNames) return leads;
+    const out: Lead[] = [];
+    for (const id of cachedNameIds.split(",")) {
+      if (!id) continue;
+      const lead = peekCrmEntity("leads", id);
+      if (lead) out.push(lead);
+    }
+    return out;
+  }, [resolveNames, leads, cachedNameIds]);
+  const leadById = React.useMemo(
+    () => new Map(resolvedLeads.map((lead) => [lead.id, lead])),
+    [resolvedLeads],
+  );
 
   return (
     <>
@@ -272,7 +300,7 @@ export function ActionBoardPanel({
           tasks={tasks}
           followups={followups}
           meetings={meetings}
-          leads={leads}
+          leads={resolvedLeads}
         />
       ) : null}
     </>

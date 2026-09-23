@@ -21,6 +21,9 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
+import { CrmListLoadMore } from "@/components/common/crm-list-load-more";
+import { isLiveCrmSnapshotDisabled } from "@/lib/dashboard-kpi-v2-flags";
+import { peekCrmEntity, rememberCrmEntities } from "@/lib/crm/entity-cache";
 import { fmtRelative, initials } from "@/lib/format";
 import { UserChip } from "@/components/common/user-chip";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
@@ -76,20 +79,46 @@ function telHref(phone: string) {
 
 export default function ContactsPage() {
   const router = useRouter();
-  const { contacts: wsContacts, accounts, users, isDemo, workspaceLoading } = useWorkspace();
+  const { contacts: wsContacts, accounts: wsAccounts, users, isDemo, workspaceLoading } = useWorkspace();
+  const snapshotOff = isLiveCrmSnapshotDisabled(isDemo);
+  const [query, setQuery] = React.useState("");
+  const [extraAccounts, setExtraAccounts] = React.useState<typeof wsAccounts>([]);
   const crmPages = useCrmEntityPages({
     entity: "contacts",
     enabled: !isDemo,
-    drain: true,
+    drain: !snapshotOff,
     includeTotalCount: true,
+    filters: snapshotOff && query.trim() ? { q: query.trim() } : undefined,
   });
   const contacts = React.useMemo(() => {
     if (crmPages.enabled) return crmPages.items as typeof wsContacts;
     return wsContacts;
   }, [crmPages.enabled, crmPages.items, wsContacts]);
+  const accountIdsKey = React.useMemo(() => {
+    if (!snapshotOff) return "";
+    return [...new Set(contacts.map((c) => c.accountId).filter(Boolean))].sort().join(",");
+  }, [snapshotOff, contacts]);
+  React.useEffect(() => {
+    if (!snapshotOff || !accountIdsKey) return;
+    const missing = accountIdsKey.split(",").filter((id) => !peekCrmEntity("accounts", id));
+    if (!missing.length) return;
+    const params = new URLSearchParams({ ids: missing.slice(0, 100).join(","), limit: "100" });
+    void fetch(`/api/org/accounts?${params.toString()}`, { credentials: "same-origin", cache: "no-store" })
+      .then((res) => res.json())
+      .then((json: { accounts?: { id: string }[] }) => {
+        if (Array.isArray(json.accounts)) {
+          rememberCrmEntities("accounts", json.accounts as never);
+          setExtraAccounts(json.accounts as typeof wsAccounts);
+        }
+      })
+      .catch(() => undefined);
+  }, [snapshotOff, accountIdsKey]);
   const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const { openQuickAdd } = useOpenQuickAdd();
-  const [query, setQuery] = React.useState("");
+  const accounts = React.useMemo(
+    () => (snapshotOff ? [...wsAccounts, ...extraAccounts] : wsAccounts),
+    [snapshotOff, wsAccounts, extraAccounts],
+  );
   const q = query.trim().toLowerCase();
   const filtered = contacts.filter((c) => contactMatchesQuery(c, q, accounts, users));
 
@@ -162,7 +191,10 @@ export default function ContactsPage() {
                   </TableRow>
                 )}
                 {filtered.map((c) => {
-                  const account = accounts.find((a) => a.id === c.accountId);
+                  const account =
+                    wsAccounts.find((a) => a.id === c.accountId) ??
+                    extraAccounts.find((a) => a.id === c.accountId) ??
+                    peekCrmEntity("accounts", c.accountId);
                   const name = contactDisplayName(c);
                   return (
                     <TableRow
@@ -265,6 +297,12 @@ export default function ContactsPage() {
             </Table>
           </div>
         </div>
+        {snapshotOff ? (
+          <CrmListLoadMore
+            hasMore={crmPages.hasNextPage}
+            onLoadMore={() => void crmPages.fetchNextPage()}
+          />
+        ) : null}
           </>
         )}
       </PageBody>

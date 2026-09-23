@@ -13,4 +13,13 @@ describe("resolveCrmListNarrowToMember", () => {
     expect(resolveCrmListNarrowToMember("admin", "1")).toBe(true);
     expect(resolveCrmListNarrowToMember("owner", "1")).toBe(true);
   });
+
+  it("does not narrow a CRM director who is an org member", () => {
+    expect(
+      resolveCrmListNarrowToMember("member", "0", { roleId: "director" }),
+    ).toBe(false);
+    expect(
+      resolveCrmListNarrowToMember("member", "1", { roleId: "director" }),
+    ).toBe(true);
+  });
 });
