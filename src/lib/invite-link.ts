@@ -35,3 +35,18 @@ export function authSignInPath(): string {
 export function authSignUpPath(): string {
   return isClerkAuthV1Enabled() ? "/sign-up" : "/signup";
 }
+
+/**
+ * Append invite/join tokens to a relative post-auth redirect so Clerk
+ * forceRedirectUrl keeps them when sessionStorage is cleared or lost.
+ */
+export function withInviteJoinParams(
+  path: string,
+  opts: { invite?: string; join?: string },
+): string {
+  const base = path.startsWith("/") && !path.startsWith("//") ? path : "/dashboard";
+  const url = new URL(base, "http://nova.local");
+  if (opts.invite?.trim()) url.searchParams.set("invite", opts.invite.trim());
+  if (opts.join?.trim()) url.searchParams.set("join", opts.join.trim());
+  return `${url.pathname}${url.search}`;
+}

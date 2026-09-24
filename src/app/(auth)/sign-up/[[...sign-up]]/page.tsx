@@ -2,6 +2,7 @@ import { SignUp } from "@clerk/nextjs";
 import { redirect } from "next/navigation";
 import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
 import { ClerkInviteStash } from "@/components/providers/clerk-invite-stash";
+import { withInviteJoinParams } from "@/lib/invite-link";
 
 function firstString(v: string | string[] | undefined): string | undefined {
   if (typeof v === "string") return v;
@@ -21,10 +22,10 @@ export default async function ClerkSignUpPage({
   const q = await searchParams;
   const invite = firstString(q.invite);
   const join = firstString(q.join);
-  const after =
-    invite || join
-      ? "/dashboard"
-      : "/onboarding";
+  const after = withInviteJoinParams(invite || join ? "/dashboard" : "/onboarding", {
+    invite,
+    join,
+  });
 
   return (
     <>

@@ -19,10 +19,10 @@ import {
 export function ClerkCompleteMembership() {
   const { isLoaded, isSignedIn } = useAuth();
   const searchParams = useSearchParams();
-  const ranRef = React.useRef(false);
+  const inFlightRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (!isClerkAuthV1Enabled() || !isLoaded || !isSignedIn || ranRef.current) {
+    if (!isClerkAuthV1Enabled() || !isLoaded || !isSignedIn || inFlightRef.current) {
       return;
     }
 
@@ -35,7 +35,7 @@ export function ClerkCompleteMembership() {
     const { inviteToken, openJoinToken } = peekInviteTokens();
     if (!inviteToken && !openJoinToken) return;
 
-    ranRef.current = true;
+    inFlightRef.current = true;
     let cancelled = false;
 
     void (async () => {
@@ -55,9 +55,12 @@ export function ClerkCompleteMembership() {
           membershipPending?: boolean;
           organizationId?: string | null;
         };
-        if (cancelled) return;
+        if (cancelled) {
+          inFlightRef.current = false;
+          return;
+        }
         if (!res.ok || !data.ok) {
-          ranRef.current = false;
+          inFlightRef.current = false;
           toast.error(data.error || "Could not accept invite", {
             description: "Ask an admin to resend the invite, then try again.",
           });
@@ -72,8 +75,11 @@ export function ClerkCompleteMembership() {
         // Hard reload so server session + workspace pick up org membership.
         window.location.replace("/dashboard");
       } catch {
-        if (cancelled) return;
-        ranRef.current = false;
+        if (cancelled) {
+          inFlightRef.current = false;
+          return;
+        }
+        inFlightRef.current = false;
         toast.error("Could not accept invite", {
           description: "Check your connection and try signing in again from the invite link.",
         });
@@ -82,6 +88,8 @@ export function ClerkCompleteMembership() {
 
     return () => {
       cancelled = true;
+      // Allow remount (Strict Mode / navigation) to retry while tokens remain.
+      inFlightRef.current = false;
     };
   }, [isLoaded, isSignedIn, searchParams]);
 

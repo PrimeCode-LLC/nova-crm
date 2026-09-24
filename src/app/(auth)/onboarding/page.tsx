@@ -128,7 +128,15 @@ export default function OnboardingPage() {
         <button
           type="button"
           className="text-primary hover:underline"
-          onClick={() => router.replace(isClerkAuthV1Enabled() ? "/sign-in" : "/login")}
+          onClick={() => {
+            const tokens = peekInviteTokens();
+            const params = new URLSearchParams();
+            if (tokens.inviteToken) params.set("invite", tokens.inviteToken);
+            if (tokens.openJoinToken) params.set("join", tokens.openJoinToken);
+            const qs = params.toString();
+            const base = isClerkAuthV1Enabled() ? "/sign-in" : "/login";
+            router.replace(qs ? `${base}?${qs}` : base);
+          }}
         >
           Sign in instead
         </button>

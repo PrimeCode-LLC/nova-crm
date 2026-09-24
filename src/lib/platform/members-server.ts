@@ -141,6 +141,21 @@ export async function getMemberServer(
   return docToMember(orgId, d.id, d.data()!);
 }
 
+/**
+ * Document-store only (no Postgres). Use after member writes when mirroring
+ * to Postgres so we do not re-read a stale SQL row.
+ */
+export async function getMemberFromDocumentStoreServer(
+  orgId: string,
+  uid: string,
+): Promise<OrganizationMember | null> {
+  const col = membersCol(orgId);
+  if (!col) return null;
+  const d = await col.doc(uid).get();
+  if (!d.exists) return null;
+  return docToMember(orgId, d.id, d.data()!);
+}
+
 export async function findMembershipForUserServer(
   uid: string,
 ): Promise<OrganizationMember | null> {

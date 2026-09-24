@@ -468,6 +468,13 @@ function PeoplePageClientInner({
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Failed");
+      // Optimistic local update so the table reflects the change immediately.
+      setMembers((prev) =>
+        prev.map((m) => (m.uid === uid ? { ...m, ...patch } : m)),
+      );
+      setEditMember((prev) =>
+        prev && prev.uid === uid ? { ...prev, ...patch } : prev,
+      );
       toast.success("Updated");
       await refresh();
     } catch (err) {

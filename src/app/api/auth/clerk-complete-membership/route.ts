@@ -10,6 +10,7 @@ import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import {
   assertNotMemberOfOtherOrgServer,
   findMembershipForUserServer,
+  getMemberServer,
   hasSeatAvailableServer,
   upsertMemberServer,
 } from "@/lib/platform/members-server";
@@ -20,6 +21,8 @@ import {
 import { verifyOpenJoinTokenServer } from "@/lib/platform/open-join-server";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { provisionCrmProfileServer } from "@/lib/platform/crm-profile-provision";
+import { roleAtLeast } from "@/lib/platform/org-role";
+import type { OrgMemberRole } from "@/lib/types";
 
 const bodySchema = z.object({
   inviteToken: z.string().min(1).optional(),
@@ -72,52 +75,88 @@ export async function POST(req: Request) {
   }
 
   let organizationId: string | undefined;
-  let orgRole: "owner" | "admin" | "manager" | "member" | undefined;
+  let orgRole: OrgMemberRole | undefined;
   let membershipPending = false;
 
   if (inviteToken) {
     const lookup = await lookupInviteByTokenServer(inviteToken);
     if (!lookup.ok) {
-      const reason =
-        lookup.reason === "expired"
-          ? "Invite expired."
-          : lookup.reason === "revoked"
-            ? "Invite was revoked."
-            : lookup.reason === "accepted"
-              ? "Invite was already used."
-              : "Invite not found.";
-      return NextResponse.json({ error: reason }, { status: 400 });
-    }
-    const invite = lookup.invite;
-    if (email && invite.email && invite.email !== email) {
-      return NextResponse.json(
-        { error: `This invite is for ${invite.email}, not ${email}.` },
-        { status: 400 },
+      // Idempotent: invite already consumed but this user is already an active member.
+      if (lookup.reason === "accepted") {
+        const parts = inviteToken.split(".");
+        const inviteOrgId = parts[0];
+        if (inviteOrgId) {
+          const existing = await getMemberServer(inviteOrgId, uid);
+          if (existing?.status === "active") {
+            organizationId = existing.organizationId;
+            orgRole = existing.role;
+          }
+        }
+      }
+      if (!organizationId || !orgRole) {
+        const reason =
+          lookup.reason === "expired"
+            ? "Invite expired."
+            : lookup.reason === "revoked"
+              ? "Invite was revoked."
+              : lookup.reason === "accepted"
+                ? "Invite was already used."
+                : "Invite not found.";
+        return NextResponse.json({ error: reason }, { status: 400 });
+      }
+    } else {
+      const invite = lookup.invite;
+      if (email && invite.email && invite.email !== email) {
+        return NextResponse.json(
+          { error: `This invite is for ${invite.email}, not ${email}.` },
+          { status: 400 },
+        );
+      }
+
+      const existingInOrg = await getMemberServer(invite.organizationId, uid);
+      const alreadyActiveInOrg = existingInOrg?.status === "active";
+
+      if (!alreadyActiveInOrg) {
+        const seat = await hasSeatAvailableServer(invite.organizationId);
+        if ("error" in seat) {
+          return NextResponse.json({ error: seat.error }, { status: 400 });
+        }
+      }
+
+      const membershipCheck = await assertNotMemberOfOtherOrgServer(
+        uid,
+        invite.organizationId,
       );
+      if ("error" in membershipCheck) {
+        return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
+      }
+
+      // Upgrade-only: never demote an existing higher workspace role.
+      let roleToWrite: OrgMemberRole = invite.role;
+      if (
+        existingInOrg?.status === "active" &&
+        roleAtLeast(existingInOrg.role, invite.role)
+      ) {
+        roleToWrite = existingInOrg.role;
+      }
+
+      const up = await upsertMemberServer({
+        organizationId: invite.organizationId,
+        uid,
+        email,
+        displayName,
+        role: roleToWrite,
+        status: "active",
+        invitedByUid: invite.createdByUid,
+      });
+      if ("error" in up) {
+        return NextResponse.json({ error: up.error }, { status: 400 });
+      }
+
+      await markInviteAcceptedServer(invite.organizationId, invite.id, uid);
+      organizationId = invite.organizationId;
+      orgRole = roleToWrite;
     }
-    const seat = await hasSeatAvailableServer(invite.organizationId);
-    if ("error" in seat) {
-      return NextResponse.json({ error: seat.error }, { status: 400 });
-    }
-    const membershipCheck = await assertNotMemberOfOtherOrgServer(
-      uid,
-      invite.organizationId,
-    );
-    if ("error" in membershipCheck) {
-      return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
-    }
-    await upsertMemberServer({
-      organizationId: invite.organizationId,
-      uid,
-      email,
-      displayName,
-      role: invite.role,
-      status: "active",
-      invitedByUid: invite.createdByUid,
-    });
-    await markInviteAcceptedServer(invite.organizationId, invite.id, uid);
-    organizationId = invite.organizationId;
-    orgRole = invite.role;
   } else if (openJoinToken) {
     const joinOrg = await verifyOpenJoinTokenServer(openJoinToken);
     if (!joinOrg) {
@@ -148,7 +187,7 @@ export async function POST(req: Request) {
         );
       }
     } else {
-      await upsertMemberServer({
+      const up = await upsertMemberServer({
         organizationId: targetOrgId,
         uid,
         email,
@@ -157,6 +196,9 @@ export async function POST(req: Request) {
         status: "pending",
         invitedByUid: "open-join-link",
       });
+      if ("error" in up) {
+        return NextResponse.json({ error: up.error }, { status: 400 });
+      }
       membershipPending = true;
       organizationId = targetOrgId;
     }
@@ -181,14 +223,18 @@ export async function POST(req: Request) {
   await db.collection(COLLECTIONS.users).doc(uid).set(userPayload, { merge: true });
 
   if (!membershipPending && organizationId && orgRole) {
-    await provisionCrmProfileServer(db, {
-      uid,
-      organizationId,
-      orgRole,
-      email,
-      displayName,
-      actorUid: uid,
-    });
+    await provisionCrmProfileServer(
+      db,
+      {
+        uid,
+        organizationId,
+        orgRole,
+        email,
+        displayName,
+        actorUid: uid,
+      },
+      { upgradeIfHigher: true },
+    );
   }
 
   if (!membershipPending && organizationId) {

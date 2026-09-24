@@ -40,7 +40,7 @@ export function renderInviteEmail(ctx: InviteEmailContext): {
             </tr>
             <tr>
               <td style="padding:8px 32px 24px 32px;font-size:14px;line-height:1.55;color:#c9c9d0;">
-                <p>${escapeHtml(inviter)} added you to <strong>${escapeHtml(ctx.organizationName)}</strong> as <strong>${escapeHtml(ctx.role)}</strong>.</p>
+                <p>${escapeHtml(inviter)} added you to <strong>${escapeHtml(ctx.organizationName)}</strong> as workspace <strong>${escapeHtml(ctx.role)}</strong>.</p>
                 <p>Click the button below to set up your account. This invite is for <strong>${escapeHtml(ctx.recipientEmail)}</strong> and expires on <strong>${escapeHtml(expires)}</strong>.</p>
               </td>
             </tr>
@@ -64,7 +64,7 @@ export function renderInviteEmail(ctx: InviteEmailContext): {
 </html>`;
 
   const text = [
-    `${inviter} added you to ${ctx.organizationName} as ${ctx.role}.`,
+    `${inviter} added you to ${ctx.organizationName} as workspace ${ctx.role}.`,
     "",
     `Accept the invitation:`,
     ctx.acceptUrl,

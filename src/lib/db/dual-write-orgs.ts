@@ -150,8 +150,12 @@ export async function mirrorMemberAfterWrite(
 ): Promise<void> {
   if (!isDatabaseConfigured()) return;
   try {
-    const { getMemberServer } = await import("@/lib/platform/members-server");
-    const member = await getMemberServer(orgId, uid);
+    // Read document store (source of the write), not getMemberServer —
+    // that prefers Postgres and would mirror the pre-write role/status.
+    const { getMemberFromDocumentStoreServer } = await import(
+      "@/lib/platform/members-server"
+    );
+    const member = await getMemberFromDocumentStoreServer(orgId, uid);
     if (!member) return;
     await upsertMemberMirror(member);
   } catch (err) {

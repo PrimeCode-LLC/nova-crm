@@ -4,7 +4,7 @@ import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
   deleteMemberServer,
-  getMemberServer,
+  getMemberFromDocumentStoreServer,
   listMembersServer,
   setMemberRoleServer,
   setMemberStatusServer,
@@ -71,16 +71,20 @@ export async function PATCH(req: Request) {
           { orgRole: role, updatedAt: FieldValue.serverTimestamp() },
           { merge: true },
         );
-      const member = await getMemberServer(orgId, uid);
+      const member = await getMemberFromDocumentStoreServer(orgId, uid);
       if (member?.status === "active") {
-        await provisionCrmProfileServer(db, {
-          uid,
-          organizationId: orgId,
-          orgRole: role,
-          email: member.email,
-          displayName: member.displayName,
-          actorUid: g.ctx.session.uid,
-        });
+        await provisionCrmProfileServer(
+          db,
+          {
+            uid,
+            organizationId: orgId,
+            orgRole: role,
+            email: member.email,
+            displayName: member.displayName,
+            actorUid: g.ctx.session.uid,
+          },
+          { upgradeIfHigher: true },
+        );
       }
     }
     await recordAudit({
@@ -91,7 +95,8 @@ export async function PATCH(req: Request) {
     });
   }
   if (status) {
-    const beforeStatus = (await getMemberServer(orgId, uid))?.status ?? "active";
+    const beforeStatus =
+      (await getMemberFromDocumentStoreServer(orgId, uid))?.status ?? "active";
     if (status === "active" && beforeStatus === "pending") {
       const seat = await hasSeatAvailableServer(orgId);
       if ("error" in seat) {
@@ -117,7 +122,7 @@ export async function PATCH(req: Request) {
     });
 
     if (beforeStatus === "pending" && status === "active") {
-      const member = await getMemberServer(orgId, uid);
+      const member = await getMemberFromDocumentStoreServer(orgId, uid);
       const db = getAdminDb();
       if (db) {
         await db
@@ -132,23 +137,29 @@ export async function PATCH(req: Request) {
             },
             { merge: true },
           );
-        await provisionCrmProfileServer(db, {
-          uid,
-          organizationId: orgId,
-          orgRole: member?.role ?? "member",
-          email: member?.email,
-          displayName: member?.displayName,
-          actorUid: g.ctx.session.uid,
-        });
+        await provisionCrmProfileServer(
+          db,
+          {
+            uid,
+            organizationId: orgId,
+            orgRole: member?.role ?? "member",
+            email: member?.email,
+            displayName: member?.displayName,
+            actorUid: g.ctx.session.uid,
+          },
+          { upgradeIfHigher: true },
+        );
       }
       await g.ctx.adminAuth?.revokeRefreshTokens(uid);
     }
   }
 
   // Refresh claims so the affected user's next ID-token refresh picks up the change.
+  // Prefer document store after writes — Postgres-first getMemberServer can lag the mirror.
   if (role || status) {
-    const member = await getMemberServer(orgId, uid);
+    const member = await getMemberFromDocumentStoreServer(orgId, uid);
     const effectiveStatus = member?.status ?? "active";
+    const effectiveRole = role ?? member?.role ?? "member";
     if (effectiveStatus === "disabled") {
       const db = getAdminDb();
       await db
@@ -176,25 +187,29 @@ export async function PATCH(req: Request) {
         .set(
           {
             organizationId: orgId,
-            orgRole: member?.role ?? "member",
+            orgRole: effectiveRole,
             membershipPendingOrgId: FieldValue.delete(),
             updatedAt: FieldValue.serverTimestamp(),
           },
           { merge: true },
         );
       if (db && member) {
-        await provisionCrmProfileServer(db, {
-          uid,
-          organizationId: orgId,
-          orgRole: member.role,
-          email: member.email,
-          displayName: member.displayName,
-          actorUid: g.ctx.session.uid,
-        });
+        await provisionCrmProfileServer(
+          db,
+          {
+            uid,
+            organizationId: orgId,
+            orgRole: effectiveRole,
+            email: member.email,
+            displayName: member.displayName,
+            actorUid: g.ctx.session.uid,
+          },
+          { upgradeIfHigher: true },
+        );
       }
       await setAppClaims(g.ctx.adminAuth, uid, {
         organizationId: orgId,
-        orgRole: member?.role,
+        orgRole: effectiveRole,
       });
     } else {
       await setAppClaims(g.ctx.adminAuth, uid, {

@@ -6,11 +6,16 @@ import {
 } from "@/lib/permissions/roles-server";
 import {
   defaultCrmRoleIdForOrgRole,
+  shouldUpgradeCrmRoleForOrgRole,
   shouldUpgradeCrmRoleOnBackfill,
 } from "@/lib/platform/crm-role-defaults";
 import type { OrgMemberRole, Role } from "@/lib/types";
 
-export { defaultCrmRoleIdForOrgRole, shouldUpgradeCrmRoleOnBackfill } from "@/lib/platform/crm-role-defaults";
+export {
+  defaultCrmRoleIdForOrgRole,
+  shouldUpgradeCrmRoleForOrgRole,
+  shouldUpgradeCrmRoleOnBackfill,
+} from "@/lib/platform/crm-role-defaults";
 
 function existingRoleId(existing: Record<string, unknown> | null): Role | undefined {
   const raw = existing?.roleId;
@@ -27,19 +32,27 @@ export type CrmProfileProvisionInput = {
 };
 
 export type CrmProfileProvisionOptions = {
-  /** When true, upgrade owners stuck on salesperson and fill missing roleId values. */
+  /**
+   * When true (backfill), upgrade CRM role when org role implies a higher default
+   * and fill missing roleId values.
+   */
   forceRoleSync?: boolean;
+  /**
+   * When true (invite accept / org role promotion), upgrade CRM role if the
+   * default for `orgRole` ranks higher than the current roleId. Never demotes.
+   */
+  upgradeIfHigher?: boolean;
 };
 
 export type CrmProfileProvisionResult = {
   provisioned: boolean;
   roleId?: Role;
-  reason?: "missing_role" | "upgraded_owner" | "already_set";
+  reason?: "missing_role" | "upgraded_role" | "already_set";
 };
 
 /**
  * Merge workspace membership fields and default CRM permissions onto `users/{uid}`.
- * Idempotent: skips when a CRM role is already assigned unless `forceRoleSync` applies.
+ * Idempotent: skips when a CRM role is already assigned unless upgrade options apply.
  */
 export async function provisionCrmProfileServer(
   db: Firestore,
@@ -54,15 +67,18 @@ export async function provisionCrmProfileServer(
   let assignRoleId: Role | undefined;
   let reason: CrmProfileProvisionResult["reason"];
 
+  const allowUpgrade =
+    options.upgradeIfHigher === true || options.forceRoleSync === true;
+
   if (!currentRoleId) {
     assignRoleId = defaultCrmRoleIdForOrgRole(input.orgRole);
     reason = "missing_role";
   } else if (
-    options.forceRoleSync &&
-    shouldUpgradeCrmRoleOnBackfill(input.orgRole, currentRoleId)
+    allowUpgrade &&
+    shouldUpgradeCrmRoleForOrgRole(input.orgRole, currentRoleId)
   ) {
     assignRoleId = defaultCrmRoleIdForOrgRole(input.orgRole);
-    reason = "upgraded_owner";
+    reason = "upgraded_role";
   } else {
     return { provisioned: false, roleId: currentRoleId, reason: "already_set" };
   }
