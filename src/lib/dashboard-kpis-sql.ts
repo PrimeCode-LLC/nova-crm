@@ -61,6 +61,61 @@ export function dashboardRangeStartIso(
   return getDashboardRangeStart(range, { now, timeZone }).toISOString();
 }
 
+/**
+ * Payload *At fields may be ISO strings or accidental document-shim shapes
+ * (`{"_date":"…"}` / Firestore seconds). Blind `payload->>'x'::timestamptz` throws
+ * Postgres 22007 on object text — coerce the same shapes as coerceInstantMs.
+ *
+ * `payloadExpr` / `field` are allowlisted identifiers only (never user input).
+ */
+type SqlPayloadInstantField =
+  | "lastActivityAt"
+  | "lastReplyAt"
+  | "lastEmailOpenedAt";
+
+const SQL_PAYLOAD_INSTANT_FIELDS = new Set<string>([
+  "lastActivityAt",
+  "lastReplyAt",
+  "lastEmailOpenedAt",
+]);
+
+const SQL_PAYLOAD_EXPR_RE = /^(?:[a-z_][a-z0-9_]*\.)?payload$/i;
+
+/** Safe `timestamptz` (or NULL) from a lead payload instant field. */
+export function sqlPayloadTimestamptz(
+  payloadExpr: string,
+  field: SqlPayloadInstantField,
+): Prisma.Sql {
+  if (!SQL_PAYLOAD_EXPR_RE.test(payloadExpr) || !SQL_PAYLOAD_INSTANT_FIELDS.has(field)) {
+    throw new Error(`sqlPayloadTimestamptz: unsafe args (${payloadExpr}, ${field})`);
+  }
+  // Trusted identifiers only — Prisma.raw is required for jsonb path keys.
+  return Prisma.raw(`(
+    CASE
+      WHEN jsonb_typeof(${payloadExpr}->'${field}') = 'string'
+        AND NULLIF(BTRIM(${payloadExpr}->>'${field}'), '') IS NOT NULL
+        AND BTRIM(${payloadExpr}->>'${field}') ~ '^[0-9]{4}-'
+      THEN NULLIF(BTRIM(${payloadExpr}->>'${field}'), '')::timestamptz
+      WHEN jsonb_typeof(${payloadExpr}->'${field}') = 'object'
+        AND NULLIF(BTRIM(${payloadExpr}->'${field}'->>'_date'), '') IS NOT NULL
+        AND BTRIM(${payloadExpr}->'${field}'->>'_date') ~ '^[0-9]{4}-'
+      THEN NULLIF(BTRIM(${payloadExpr}->'${field}'->>'_date'), '')::timestamptz
+      WHEN jsonb_typeof(${payloadExpr}->'${field}') = 'object'
+        AND COALESCE(
+          NULLIF(${payloadExpr}->'${field}'->>'_seconds', ''),
+          NULLIF(${payloadExpr}->'${field}'->>'seconds', '')
+        ) ~ '^[0-9]+([.][0-9]+)?$'
+      THEN to_timestamp(
+        COALESCE(
+          (${payloadExpr}->'${field}'->>'_seconds')::double precision,
+          (${payloadExpr}->'${field}'->>'seconds')::double precision
+        )
+      )
+      ELSE NULL
+    END
+  )`);
+}
+
 type SqlOwnerScopeFilter = {
   sql: Prisma.Sql;
   /** When true, caller must apply hierarchy in Node (prospect / unassigned rules). */
@@ -118,10 +173,11 @@ function buildSqlLeadDateRangeFilter(
 ): Prisma.Sql {
   if (range === "all") return Prisma.sql`TRUE`;
   const start = rangeStartIso;
+  const lastActivity = sqlPayloadTimestamptz("l.payload", "lastActivityAt");
   return Prisma.sql`(
     l.stage NOT IN ('won', 'lost')
     OR COALESCE(
-      NULLIF(BTRIM(l.payload->>'lastActivityAt'), '')::timestamptz,
+      ${lastActivity},
       l.updated_at,
       l.created_at
     ) >= ${start}::timestamptz
@@ -512,7 +568,7 @@ async function queryOrgPointMetricsSql(
           AND stage NOT IN ('won', 'lost')
           AND EXTRACT(EPOCH FROM (
             NOW() - COALESCE(
-              NULLIF(BTRIM(payload->>'lastActivityAt'), '')::timestamptz,
+              ${sqlPayloadTimestamptz("payload", "lastActivityAt")},
               updated_at,
               created_at
             )
@@ -542,7 +598,7 @@ async function queryOrgPointMetricsSql(
       )::bigint AS prospects_pushed,
       COUNT(*) FILTER (
         WHERE (
-          NULLIF(BTRIM(payload->>'lastReplyAt'), '') IS NOT NULL
+          ${sqlPayloadTimestamptz("payload", "lastReplyAt")} IS NOT NULL
           OR stage IN ('replied', 'qualified', 'discovery', 'proposal', 'negotiation')
         )
         AND stage <> 'lost'
@@ -587,12 +643,12 @@ async function queryOrgRangeMetricsSql(
   >`
     SELECT
       COUNT(*) FILTER (
-        WHERE NULLIF(BTRIM(payload->>'lastReplyAt'), '') IS NOT NULL
-          AND (NULLIF(BTRIM(payload->>'lastReplyAt'), '')::timestamptz >= ${start}::timestamptz)
+        WHERE ${sqlPayloadTimestamptz("payload", "lastReplyAt")} IS NOT NULL
+          AND (${sqlPayloadTimestamptz("payload", "lastReplyAt")} >= ${start}::timestamptz)
       )::bigint AS replies,
       COUNT(*) FILTER (
-        WHERE NULLIF(BTRIM(payload->>'lastEmailOpenedAt'), '') IS NOT NULL
-          AND (NULLIF(BTRIM(payload->>'lastEmailOpenedAt'), '')::timestamptz >= ${start}::timestamptz)
+        WHERE ${sqlPayloadTimestamptz("payload", "lastEmailOpenedAt")} IS NOT NULL
+          AND (${sqlPayloadTimestamptz("payload", "lastEmailOpenedAt")} >= ${start}::timestamptz)
       )::bigint AS opens,
       (
         SELECT COALESCE(SUM(d.value), 0)::float8

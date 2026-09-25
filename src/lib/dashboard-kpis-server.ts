@@ -454,16 +454,21 @@ export async function getDashboardKpisServer(
         seesAllLeadsInTenant(kpiViewer) &&
         !previewRole;
       if (canSqlScope) {
-        const sqlAgg = await fetchScopedLeadDealSqlAggregates({
-          organizationId: orgId,
-          range,
-          timeZone: bundle.timeZone,
-          channels,
-          ownerScope,
-          currentUserId: kpiViewer.id,
-          users: bundle.users,
-        });
-        computed = applySqlLeadDealAggregatesToKpiPayload(computed, sqlAgg);
+        try {
+          const sqlAgg = await fetchScopedLeadDealSqlAggregates({
+            organizationId: orgId,
+            range,
+            timeZone: bundle.timeZone,
+            channels,
+            ownerScope,
+            currentUserId: kpiViewer.id,
+            users: bundle.users,
+          });
+          computed = applySqlLeadDealAggregatesToKpiPayload(computed, sqlAgg);
+        } catch (err) {
+          // Keep Node-computed gauges rather than 500 the whole dashboard.
+          console.error("[dashboard-kpis] SQL aggregates failed; using Node compute", err);
+        }
       }
     }
 

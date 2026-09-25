@@ -3,6 +3,7 @@ import {
   buildSqlOwnerScopeFilter,
   dashboardRangeStartIso,
   fetchScopedLeadDealSqlAggregates,
+  sqlPayloadTimestamptz,
 } from "@/lib/dashboard-kpis-sql";
 import { computeScopedDashboardKpis } from "@/lib/dashboard-kpis-server";
 import type { User } from "@/lib/types";
@@ -47,6 +48,23 @@ describe("dashboardRangeStartIso", () => {
     const now = new Date("2026-06-15T12:00:00.000Z");
     const iso = dashboardRangeStartIso("30d", "UTC", now);
     expect(iso).toBe(new Date("2026-05-16T12:00:00.000Z").toISOString());
+  });
+});
+
+describe("sqlPayloadTimestamptz", () => {
+  it("emits ISO string and {_date} object coercion for lastActivityAt", () => {
+    const sql = sqlPayloadTimestamptz("l.payload", "lastActivityAt");
+    const raw = String(sql.strings[0] ?? sql);
+    expect(raw).toContain("jsonb_typeof(l.payload->'lastActivityAt')");
+    expect(raw).toContain("->>'_date'");
+    expect(raw).toContain("::timestamptz");
+    expect(raw).not.toContain("l.payload->>'lastActivityAt')::timestamptz");
+  });
+
+  it("rejects non-allowlisted field names", () => {
+    expect(() =>
+      sqlPayloadTimestamptz("payload", "hackedAt" as "lastActivityAt"),
+    ).toThrow(/unsafe/);
   });
 });
 
