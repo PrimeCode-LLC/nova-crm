@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getLeadSequenceStatus } from "@/lib/lead-sequence-status";
+import { Timestamp } from "@/lib/db/document-shim/timestamp";
+import {
+  countLeadsWithSequenceStatus,
+  getLeadSequenceStatus,
+} from "@/lib/lead-sequence-status";
 import type { Followup, FollowupPlan, Lead } from "@/lib/types";
 
 function lead(partial: Partial<Lead> & Pick<Lead, "id">): Pick<Lead, "id" | "channel"> {
@@ -111,5 +115,32 @@ describe("getLeadSequenceStatus", () => {
     ];
     const followups = [step({ id: "f1", planId: "p-new", leadId: "l1" })];
     expect(getLeadSequenceStatus(lead({ id: "l1" }), plans, followups)).toBe("needs_schedule");
+  });
+
+  it("indexes multiple Timestamp createdAt plans without localeCompare (prod KPI path)", () => {
+    const older = Timestamp.fromDate(new Date("2026-01-01T00:00:00.000Z"));
+    const newer = Timestamp.fromDate(new Date("2026-02-01T00:00:00.000Z"));
+    const plans = [
+      plan({
+        id: "p-old",
+        leadId: "l1",
+        status: "active",
+        createdAt: older as unknown as string,
+      }),
+      plan({
+        id: "p-new",
+        leadId: "l1",
+        status: "active",
+        createdAt: newer as unknown as string,
+      }),
+    ];
+    const followups = [step({ id: "f1", planId: "p-new", leadId: "l1" })];
+    expect(getLeadSequenceStatus(lead({ id: "l1" }), plans, followups)).toBe("needs_schedule");
+    expect(
+      countLeadsWithSequenceStatus([lead({ id: "l1" })], plans, followups, "no_sequence"),
+    ).toBe(0);
+    expect(
+      countLeadsWithSequenceStatus([lead({ id: "l1" })], plans, followups, "needs_schedule"),
+    ).toBe(1);
   });
 });

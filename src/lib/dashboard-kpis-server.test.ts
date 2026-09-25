@@ -8,6 +8,7 @@ import {
 import { canApplyOrgWideDashboardSummary } from "@/lib/dashboard-kpi-scope";
 import { applyOrgDashboardSummaryToWorkflowMetrics } from "@/lib/dashboard-summary-apply";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
+import { Timestamp } from "@/lib/db/document-shim/timestamp";
 import type { Deal, Followup, FollowupPlan, Lead, LeadTask, User } from "@/lib/types";
 
 function lead(partial: Partial<Lead> & { id: string }): Lead {
@@ -185,6 +186,45 @@ describe("computeScopedDashboardKpis parity", () => {
       expect(server.workflow.openSalesLeads, range).toBe(client.openSalesLeads);
       expect(server.workflow.prospects, range).toBe(client.prospects);
     }
+  });
+
+  it("does not throw when followup plan createdAt is a document Timestamp", () => {
+    const tsPlans: FollowupPlan[] = [
+      {
+        id: "p-old",
+        leadId: "l3",
+        ownerId: "u-sales",
+        planSummary: "Old",
+        status: "active",
+        kind: "sequence",
+        createdAt: Timestamp.fromDate(new Date("2026-01-01T00:00:00.000Z")) as unknown as string,
+      },
+      {
+        id: "p-new",
+        leadId: "l3",
+        ownerId: "u-sales",
+        planSummary: "New",
+        status: "active",
+        kind: "sequence",
+        createdAt: Timestamp.fromDate(new Date("2026-02-01T00:00:00.000Z")) as unknown as string,
+      },
+    ];
+    expect(() =>
+      computeScopedDashboardKpis({
+        viewer: director,
+        channels: [],
+        ownerScope: "all-owners",
+        range: "30d",
+        leads,
+        deals,
+        followups,
+        plans: tsPlans,
+        leadTasks,
+        contacts: [],
+        users,
+        timeZone: "UTC",
+      }),
+    ).not.toThrow();
   });
 });
 

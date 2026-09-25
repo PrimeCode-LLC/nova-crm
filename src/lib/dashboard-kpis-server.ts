@@ -48,6 +48,7 @@ import type { PersonDashboardTaskGauges } from "@/lib/dashboard-person-summary";
 import { getOrgDashboardSummaryFromPostgres } from "@/lib/db/org-dashboard-summary-read";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { getAdminDb } from "@/lib/db/document-access/admin";
+import { serializePayloadValue } from "@/lib/db/document-shim/timestamp";
 import { isDashboardKpiSqlAggregatesEnabled } from "@/lib/dashboard-kpi-v2-flags";
 import {
   applySqlLeadDealAggregatesToKpiPayload,
@@ -217,7 +218,12 @@ async function loadOrgCollection<T>(
     .collection(collection)
     .where("organizationId", "==", organizationId)
     .get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T);
+  // Admin document reads deserialize *At fields to Timestamp; KPI helpers expect ISO
+  // strings (same shape as workspace-documents list projection).
+  return snap.docs.map((d) => {
+    const raw = serializePayloadValue({ id: d.id, ...d.data() }) as Record<string, unknown>;
+    return raw as T;
+  });
 }
 
 export async function loadDashboardKpiInputs(organizationId: string): Promise<{

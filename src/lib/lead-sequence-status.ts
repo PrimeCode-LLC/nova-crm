@@ -1,3 +1,4 @@
+import { coerceInstantMs } from "@/lib/db/document-shim/timestamp";
 import type { Followup, FollowupPlan, Lead } from "@/lib/types";
 import {
   canAutoScheduleFollowupEmail,
@@ -5,6 +6,11 @@ import {
   getActiveFollowupPlanForLead,
   getPausedFollowupPlanForLead,
 } from "@/lib/followup-plans";
+
+/** Newest-first compare; tolerates ISO strings, Date, and document-shim Timestamp. */
+function compareInstantDesc(a: unknown, b: unknown): number {
+  return (coerceInstantMs(b) ?? 0) - (coerceInstantMs(a) ?? 0);
+}
 
 /**
  * Derived outreach workflow status for a lead's current sequence.
@@ -49,7 +55,7 @@ function latestCompletedPlanForLead(
   return plans
     .filter((p) => p.leadId === leadId && p.status === "completed")
     .sort((a, b) =>
-      (b.completedAt ?? b.createdAt).localeCompare(a.completedAt ?? a.createdAt),
+      compareInstantDesc(a.completedAt ?? a.createdAt, b.completedAt ?? b.createdAt),
     )[0];
 }
 
@@ -127,21 +133,21 @@ function buildPlanIndexes(
   for (const p of plans) {
     if (p.status === "active") {
       const prev = activeByLead.get(p.leadId);
-      if (!prev || p.createdAt.localeCompare(prev.createdAt) > 0) {
+      if (!prev || compareInstantDesc(prev.createdAt, p.createdAt) > 0) {
         activeByLead.set(p.leadId, p);
       }
     } else if (p.status === "paused") {
       const prev = pausedByLead.get(p.leadId);
       const key = p.pausedAt ?? p.createdAt;
       const prevKey = prev ? (prev.pausedAt ?? prev.createdAt) : "";
-      if (!prev || key.localeCompare(prevKey) > 0) {
+      if (!prev || compareInstantDesc(prevKey, key) > 0) {
         pausedByLead.set(p.leadId, p);
       }
     } else if (p.status === "completed") {
       const prev = completedByLead.get(p.leadId);
       const key = p.completedAt ?? p.createdAt;
       const prevKey = prev ? (prev.completedAt ?? prev.createdAt) : "";
-      if (!prev || key.localeCompare(prevKey) > 0) {
+      if (!prev || compareInstantDesc(prevKey, key) > 0) {
         completedByLead.set(p.leadId, p);
       }
     }

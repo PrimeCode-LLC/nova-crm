@@ -1,3 +1,4 @@
+import { coerceInstantMs } from "@/lib/db/document-shim/timestamp";
 import type {
   ChannelKey,
   Followup,
@@ -7,13 +8,18 @@ import type {
   Lead,
 } from "@/lib/types";
 
+/** Newest-first compare; tolerates ISO strings, Date, and document-shim Timestamp. */
+function compareInstantDesc(a: unknown, b: unknown): number {
+  return (coerceInstantMs(b) ?? 0) - (coerceInstantMs(a) ?? 0);
+}
+
 export function getActiveFollowupPlanForLead(
   plans: readonly FollowupPlan[],
   leadId: string,
 ): FollowupPlan | undefined {
   return plans
     .filter((p) => p.leadId === leadId && p.status === "active")
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    .sort((a, b) => compareInstantDesc(a.createdAt, b.createdAt))[0];
 }
 
 export function channelMixLabel(mix: FollowupChannelMix | undefined): string {
@@ -222,7 +228,9 @@ export function getPausedFollowupPlanForLead(
 ): FollowupPlan | undefined {
   return plans
     .filter((p) => p.leadId === leadId && p.status === "paused")
-    .sort((a, b) => (b.pausedAt ?? b.createdAt).localeCompare(a.pausedAt ?? a.createdAt))[0];
+    .sort((a, b) =>
+      compareInstantDesc(a.pausedAt ?? a.createdAt, b.pausedAt ?? b.createdAt),
+    )[0];
 }
 
 export function followupsForPlan(followups: readonly Followup[], planId: string): Followup[] {
