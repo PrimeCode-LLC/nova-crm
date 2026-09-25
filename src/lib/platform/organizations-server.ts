@@ -309,6 +309,50 @@ export async function getOrganizationServer(
   return docToOrg(d.id, d.data()!);
 }
 
+/**
+ * Seat bumps and member writes require an organizations/{id} document.
+ * Postgres-first orgs (migration / mirror lag) may only exist in SQL —
+ * hydrate the document store from getOrganizationServer before mutating seats.
+ */
+export async function ensureOrganizationDocumentStoreServer(
+  orgId: string,
+): Promise<{ ok: true } | { error: string }> {
+  const db = getAdminDb();
+  if (!db) return { error: "Database not configured" };
+  const ref = db.collection(COLLECTIONS.organizations).doc(orgId);
+  const existing = await ref.get();
+  if (existing.exists) return { ok: true };
+
+  const org = await getOrganizationServer(orgId);
+  if (!org) return { error: "Organization not found" };
+
+  const payload: Record<string, unknown> = {
+    name: org.name,
+    slug: org.slug,
+    status: org.status,
+    planId: org.planId,
+    seatsUsed: org.seatsUsed ?? 0,
+    settings: settingsForFirestore(org.settings ?? {}),
+    intakePoolEpoch: org.intakePoolEpoch ?? 1,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (org.maxUsers != null) payload.maxUsers = org.maxUsers;
+  if (org.ownerUid) payload.ownerUid = org.ownerUid;
+  if (org.primaryEmail) payload.primaryEmail = org.primaryEmail;
+  if (org.pendingOwnerEmail) payload.pendingOwnerEmail = org.pendingOwnerEmail;
+  if (org.trialEndsAt) payload.trialEndsAt = new Date(org.trialEndsAt);
+  if (org.channelAdmin) payload.channelAdmin = org.channelAdmin;
+  if (org.intakeFilterDefaults) {
+    payload.intakeFilterDefaults = org.intakeFilterDefaults;
+  }
+  if (org.intentPlaybook) payload.intentPlaybook = org.intentPlaybook;
+  if (org.openJoinTokenHash) payload.openJoinTokenHash = org.openJoinTokenHash;
+  if (org.createdAt) payload.createdAt = new Date(org.createdAt);
+
+  await ref.set(payload, { merge: true });
+  return { ok: true };
+}
+
 export async function findOrganizationByPendingEmailServer(
   email: string,
 ): Promise<Organization | null> {
@@ -415,6 +459,10 @@ export async function bumpOrganizationSeatsServer(
 ): Promise<{ ok: true; seatsUsed: number } | { ok: false; error: string }> {
   const db = getAdminDb();
   if (!db) return { ok: false, error: "Database not configured" };
+
+  const ensured = await ensureOrganizationDocumentStoreServer(orgId);
+  if ("error" in ensured) return { ok: false, error: ensured.error };
+
   const ref = db.collection(COLLECTIONS.organizations).doc(orgId);
   try {
     const seatsUsed = await db.runTransaction(async (tx) => {

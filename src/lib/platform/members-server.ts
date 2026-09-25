@@ -156,6 +156,43 @@ export async function getMemberFromDocumentStoreServer(
   return docToMember(orgId, d.id, d.data()!);
 }
 
+/** Postgres-only membership lookup (no document-store fallback). */
+export async function getMemberFromPostgresServer(
+  orgId: string,
+  uid: string,
+): Promise<OrganizationMember | null> {
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (!isDatabaseConfigured()) return null;
+    const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+    const row = await withRlsBypass(async (tx) =>
+      tx.member.findUnique({
+        where: {
+          organizationId_uid: { organizationId: orgId, uid },
+        },
+      }),
+    );
+    if (!row) return null;
+    return {
+      uid: row.uid,
+      organizationId: row.organizationId,
+      email: row.email,
+      displayName: row.displayName,
+      role: row.role as OrgMemberRole,
+      status: row.status as OrgMemberStatus,
+      invitedByUid: row.invitedByUid,
+      joinedAt: row.joinedAt.toISOString(),
+      disabledAt: row.disabledAt?.toISOString(),
+    };
+  } catch (err) {
+    console.warn(
+      "[members] getMemberFromPostgresServer failed",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
 export async function findMembershipForUserServer(
   uid: string,
 ): Promise<OrganizationMember | null> {
@@ -380,12 +417,20 @@ export async function upsertMemberServer(input: {
 
   const nextStatus = (payload.status as OrgMemberStatus) ?? "active";
   if (!existing.exists && nextStatus === "active") {
-    const seat = await bumpOrganizationSeatsServer(input.organizationId, 1, {
-      enforceMax: true,
-    });
-    if (!seat.ok) {
-      await ref.delete().catch(() => null);
-      return { error: seat.error };
+    // Postgres may already count this seat (mirror / prior accept). Do not bump again.
+    const pgExisting = await getMemberFromPostgresServer(
+      input.organizationId,
+      input.uid,
+    );
+    const alreadyCounted = pgExisting?.status === "active";
+    if (!alreadyCounted) {
+      const seat = await bumpOrganizationSeatsServer(input.organizationId, 1, {
+        enforceMax: true,
+      });
+      if (!seat.ok) {
+        await ref.delete().catch(() => null);
+        return { error: seat.error };
+      }
     }
   }
   await mirrorMemberAfterWrite(input.organizationId, input.uid);
