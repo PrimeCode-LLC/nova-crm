@@ -29,6 +29,7 @@ import {
   shouldOfferFollowupTryNow,
   type FollowupDueBucket,
 } from "@/lib/followup-due-display";
+import { resolveFollowupLeadChannel } from "@/lib/followup-plans";
 import type { FollowupPageSize } from "@/lib/followup-queue-pagination";
 import type { Followup, Lead } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -273,9 +274,10 @@ const FollowupRow = React.memo(function FollowupRow({
   const queued = sendState === "queued" || sendState === "queued_late";
   const displayTitle = followupDisplayTitle(f);
   const titleMissing = !f.title?.trim();
+  const leadChannel = resolveFollowupLeadChannel(f, lead?.channel);
   // Only offer Try now when retry/schedule can actually send — not for body-less reminders.
   const showTryNow =
-    mutate && shouldOfferFollowupTryNow(f, bucket, lead?.channel, { queued });
+    mutate && shouldOfferFollowupTryNow(f, bucket, leadChannel, { queued });
   const isFailed = sendState === "failed";
   const isRetrying = sendState === "retrying";
   const due = queued

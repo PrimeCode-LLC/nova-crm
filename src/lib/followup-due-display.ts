@@ -142,6 +142,20 @@ export function planFollowupTryNow(
 }
 
 /**
+ * After hydrate: schedule plan is only actionable when the body text is present.
+ * List rows may plan "schedule" from hasMessageBody/emailSubject alone; the
+ * send client requires a real body and used to fail with a generic skip toast.
+ */
+export function tryNowScheduleNeedsBody(f: Pick<Followup, "messageBody">): boolean {
+  return !Boolean(f.messageBody?.trim());
+}
+
+/** User-facing reason when schedule cannot proceed after hydrate. */
+export function tryNowMissingBodyReason(hadBodyFlag: boolean | undefined): string {
+  return hadBodyFlag ? "could not load email body" : "no email body written yet";
+}
+
+/**
  * Row label when `title` is missing/blank. Prefer subject, then a channel cue,
  * never an empty string that leaves only the priority badge visible.
  */

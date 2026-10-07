@@ -12,6 +12,8 @@ import {
   planFollowupTryNow,
   resolveFollowupOwnerId,
   shouldOfferFollowupTryNow,
+  tryNowMissingBodyReason,
+  tryNowScheduleNeedsBody,
 } from "@/lib/followup-due-display";
 
 describe("formatFollowupDueLabel", () => {
@@ -198,6 +200,20 @@ describe("planFollowupTryNow", () => {
         "linkedin_outbound",
       ),
     ).toEqual({ kind: "bump_due" });
+  });
+});
+
+describe("tryNowScheduleNeedsBody", () => {
+  it("blocks schedule when hydrate left the body empty", () => {
+    expect(tryNowScheduleNeedsBody({ messageBody: undefined })).toBe(true);
+    expect(tryNowScheduleNeedsBody({ messageBody: "  " })).toBe(true);
+    expect(tryNowScheduleNeedsBody({ messageBody: "Hi James" })).toBe(false);
+  });
+
+  it("distinguishes missing body vs failed hydrate", () => {
+    expect(tryNowMissingBodyReason(true)).toBe("could not load email body");
+    expect(tryNowMissingBodyReason(false)).toBe("no email body written yet");
+    expect(tryNowMissingBodyReason(undefined)).toBe("no email body written yet");
   });
 });
 

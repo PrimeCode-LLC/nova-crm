@@ -86,7 +86,9 @@ import {
   isFollowupDeliveryIssue,
   isFollowupQueuedForSend,
   planFollowupTryNow,
+  tryNowMissingBodyReason,
   tryNowScheduleAtIso,
+  tryNowScheduleNeedsBody,
 } from "@/lib/followup-due-display";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -643,25 +645,40 @@ export default function FollowupsPage() {
   ) {
     let scheduled = 0;
     let retried = 0;
-    let skipped = 0;
     let scheduleIndex = 0;
     const now = Date.now();
     const total = targets.length;
     // Reasons a followup could not be sent. Try now must never silently bump the
     // due date instead - that just re-arms the same row a minute later.
     const blocked = new Map<string, number>();
-    const block = (reason: string) => blocked.set(reason, (blocked.get(reason) ?? 0) + 1);
+    const block = (reason: string) => {
+      const key = reason.trim() || "unknown error";
+      blocked.set(key, (blocked.get(key) ?? 0) + 1);
+    };
 
     for (let i = 0; i < targets.length; i++) {
       const raw = targets[i]!;
       try {
         if (!canMutateRow(raw)) {
-          skipped += 1;
+          block("no permission to update");
           continue;
         }
-        const f = await hydrateFollowupMessageBody(raw);
+
+        let f: Followup;
+        try {
+          f = await hydrateFollowupMessageBody(raw);
+        } catch (e) {
+          block(
+            e instanceof Error && e.message.trim()
+              ? e.message.trim()
+              : "could not load email body",
+          );
+          continue;
+        }
+
         const lead = f.leadId ? ws.getLeadById(f.leadId) : undefined;
-        const plan = planFollowupTryNow(f, lead?.channel);
+        const leadChannel = resolveFollowupLeadChannel(f, lead?.channel);
+        const plan = planFollowupTryNow(f, leadChannel);
 
         // Re-queueing an email that is already waiting on the mailbox send gap
         // cancels it and puts it at the back of the line, so leave it alone.
@@ -672,7 +689,7 @@ export default function FollowupsPage() {
 
         if (plan.kind === "retry") {
           if (!f.scheduledEmailId) {
-            skipped += 1;
+            block("no scheduled email linked to retry");
             continue;
           }
           const result = await retryScheduledEmailClient({
@@ -697,7 +714,7 @@ export default function FollowupsPage() {
             },
           });
           if ("error" in result) {
-            skipped += 1;
+            block(result.error);
             continue;
           }
           if (result.scheduledAt) {
@@ -716,6 +733,14 @@ export default function FollowupsPage() {
         }
 
         if (plan.kind === "schedule") {
+          // List rows omit messageBody; hydrate must succeed before we queue.
+          // emailSubject alone can still plan "schedule" — do not call the API
+          // with an empty body (that used to surface as a generic skip toast).
+          if (tryNowScheduleNeedsBody(f)) {
+            block(tryNowMissingBodyReason(raw.hasMessageBody));
+            continue;
+          }
+
           if (!lead || !sendableMailbox) {
             block(lead ? "no connected mailbox to send from" : "lead not found");
             continue;
@@ -745,7 +770,7 @@ export default function FollowupsPage() {
               activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
             });
             if ("error" in cancel) {
-              skipped += 1;
+              block(cancel.error);
               continue;
             }
             clearFollowupEmailSchedule(f.id);
@@ -768,7 +793,7 @@ export default function FollowupsPage() {
             addDemoScheduled: addScheduled,
           });
           if (!result.ok) {
-            skipped += 1;
+            block(result.error);
             continue;
           }
           setFollowupEmailSchedule(f.id, {
@@ -801,17 +826,18 @@ export default function FollowupsPage() {
       toast.success(parts.join(" · "));
     }
     if (blocked.size > 0) {
+      const blockedCount = [...blocked.values()].reduce((a, b) => a + b, 0);
       const detail = [...blocked.entries()]
-        .map(([reason, count]) => `${count} ${reason}`)
+        .map(([reason, count]) => (count === 1 ? reason : `${count}× ${reason}`))
         .join(" · ");
-      toast.warning("Nothing was sent for some followups", { description: detail });
-    }
-    if (skipped > 0) {
-      toast.error(
-        skipped === 1
-          ? "Could not try 1 followup"
-          : `Could not try ${skipped} followups`,
-      );
+      if (parts.length === 0) {
+        toast.error(
+          blockedCount === 1 ? "Could not try followup" : `Could not try ${blockedCount} followups`,
+          { description: detail },
+        );
+      } else {
+        toast.warning("Nothing was sent for some followups", { description: detail });
+      }
     }
     setSelectedIds(new Set());
   }
