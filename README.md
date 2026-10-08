@@ -216,3 +216,5 @@ Full list: `.env.example`. Env separation: [`docs/ENVIRONMENTS.md`](docs/ENVIRON
 | [`NOVA-CRM-P4-QUEUE-WORKER.md`](Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md) | Queue / worker |
 | [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) | Local / staging / prod |
 | [`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md) | One-VPS Ubuntu production setup |
+
+<!-- ci: redeploy trigger -->
