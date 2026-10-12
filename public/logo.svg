@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Nova">
+  <rect width="128" height="128" rx="28" fill="#6B5CFF"/>
+  <path
+    fill="none"
+    stroke="#0A0A0A"
+    stroke-width="10"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    d="M28 74a6 6 0 0 1-4.7-9.8l52.8-54.4a2.7 2.7 0 0 1 4.6 2.5L70.5 44.4A5.3 5.3 0 0 0 75.3 52H112a6 6 0 0 1 4.7 9.8L63.9 116.2a2.7 2.7 0 0 1-4.6-2.5l10.2-32.1A5.3 5.3 0 0 0 64.7 74Z"
+  />
+  <circle cx="104" cy="24" r="14" fill="#06B6D4"/>
+</svg>
