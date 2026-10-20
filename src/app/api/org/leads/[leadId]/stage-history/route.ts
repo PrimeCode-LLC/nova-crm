@@ -12,6 +12,7 @@ import {
   type StageHistoryEntry,
 } from "@/lib/audit-stage-history";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
+import { getLeadFromPostgres } from "@/lib/db/list-crm-postgres";
 
 export async function GET(
   _req: Request,
@@ -27,6 +28,9 @@ export async function GET(
   }
 
   const orgId = g.ctx.session.organizationId;
+  if (!(await getLeadFromPostgres(orgId, trimmedLeadId))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   const db = getAdminDb();
 
   const [allAuditRows, filterMembers] = await Promise.all([

@@ -117,9 +117,25 @@ export async function POST(req: Request) {
 
   const organizationId = guard.ctx.session.organizationId;
   const viewerRole = guard.ctx.role;
+  const viewerUid = guard.ctx.session.uid;
   const body = parsed.data;
 
   try {
+    if (body.action === "bump_lead_activity") {
+      const authz = await assertCrmLeadMutationAllowed({
+        organizationId,
+        entity: "lead",
+        id: body.id,
+        action: "patch",
+        viewerRole,
+        viewerUid,
+        patch: {},
+      });
+      if (!authz.ok) {
+        return NextResponse.json({ ok: false, error: authz.error }, { status: authz.status });
+      }
+    }
+
     if (body.action === "delete" || body.action === "patch" || body.action === "upsert") {
       const authz = await assertCrmLeadMutationAllowed({
         organizationId,
@@ -127,6 +143,7 @@ export async function POST(req: Request) {
         id: body.id,
         action: body.action,
         viewerRole,
+        viewerUid,
         patch:
           body.action === "patch"
             ? body.patch
@@ -150,6 +167,7 @@ export async function POST(req: Request) {
         id: body.lead.id,
         action: "upsert",
         viewerRole,
+        viewerUid,
         patch: body.lead.doc,
       });
       if (!authz.ok) {
@@ -211,9 +229,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, source: "postgres" as const });
   } catch (err) {
     console.error("[org/crm-write]", body.action, err);
-    return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : "CRM write failed" },
-      { status: 500 },
-    );
+    // Id already used (e.g. by a record in another workspace): don't leak Prisma text.
+    if ((err as { code?: unknown })?.code === "P2002") {
+      return NextResponse.json(
+        { ok: false, error: "A record with this id already exists." },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ ok: false, error: "CRM write failed" }, { status: 500 });
   }
 }
