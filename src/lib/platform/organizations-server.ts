@@ -309,6 +309,17 @@ export async function getOrganizationServer(
   return docToOrg(d.id, d.data()!);
 }
 
+/** Document-store-only lookup (the write source); no Postgres preference. */
+export async function getOrganizationFromDocumentStoreServer(
+  orgId: string,
+): Promise<Organization | null> {
+  const db = getAdminDb();
+  if (!db) return null;
+  const d = await db.collection(COLLECTIONS.organizations).doc(orgId).get();
+  if (!d.exists) return null;
+  return docToOrg(d.id, d.data()!);
+}
+
 /**
  * Seat bumps and member writes require an organizations/{id} document.
  * Postgres-first orgs (migration / mirror lag) may only exist in SQL —

@@ -129,10 +129,12 @@ export async function deleteMemberMirror(
 export async function mirrorOrganizationAfterWrite(orgId: string): Promise<void> {
   if (!isDatabaseConfigured()) return;
   try {
-    const { getOrganizationServer } = await import(
+    // Read document store (source of the write), not getOrganizationServer —
+    // that prefers Postgres and would mirror the pre-write row back onto itself.
+    const { getOrganizationFromDocumentStoreServer } = await import(
       "@/lib/platform/organizations-server"
     );
-    const org = await getOrganizationServer(orgId);
+    const org = await getOrganizationFromDocumentStoreServer(orgId);
     if (!org) return;
     await upsertOrganizationMirror(org);
   } catch (err) {
