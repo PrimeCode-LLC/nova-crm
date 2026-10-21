@@ -52,4 +52,20 @@ export async function persistCrmWriteClient(body: CrmWriteClientBody): Promise<v
   if (!res.ok || !json.ok) {
     throw new Error(json.error || `CRM write failed (${res.status})`);
   }
+  notifyCrmWrite(body);
+}
+
+/** Window event fired after a successful CRM write (QA 3.1). */
+export const CRM_WRITE_EVENT = "nova:crm-write";
+
+export type CrmWriteEventDetail = { entities: CrmEntity[]; created: boolean };
+
+function notifyCrmWrite(body: CrmWriteClientBody): void {
+  if (body.action === "bump_lead_activity") return;
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  const detail: CrmWriteEventDetail =
+    body.action === "upsert_graph"
+      ? { entities: ["account", "contact", "lead"], created: true }
+      : { entities: [body.entity], created: body.action !== "patch" };
+  window.dispatchEvent(new CustomEvent<CrmWriteEventDetail>(CRM_WRITE_EVENT, { detail }));
 }

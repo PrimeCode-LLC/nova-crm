@@ -5,6 +5,7 @@ import {
   collection,
   limit,
   onSnapshot,
+  subscribeToLocalDocumentWrites,
   orderBy,
   query,
   where,
@@ -58,6 +59,24 @@ import {
 
 /** Cap history listeners so WebChannel does not load unbounded org history into every client. */
 const ACTIVITY_RECORDS_LIVE_LIMIT = 200;
+/** Collections the Postgres-mode bulk loader reads (reloaded after local writes). */
+const LIVE_BULK_LOAD_COLLECTIONS = new Set<string>([
+  COLLECTIONS.users,
+  COLLECTIONS.followups,
+  COLLECTIONS.followupPlans,
+  COLLECTIONS.leadTasks,
+  COLLECTIONS.labels,
+  COLLECTIONS.profiles,
+  COLLECTIONS.campaigns,
+  COLLECTIONS.timelineEvents,
+  COLLECTIONS.orgActivityEvents,
+  COLLECTIONS.activityRecords,
+  COLLECTIONS.notes,
+  COLLECTIONS.touchpoints,
+  COLLECTIONS.departments,
+  COLLECTIONS.permissionOverrides,
+]);
+
 /** Poll interval when CRM entities are read from Postgres instead of Firestore onSnapshot. */
 /** Member dashboards rely on this poll for live KPIs (no org-summary overlay). */
 /** V2 (WORKSPACE_CRM_POLL_V2 / KPI API): ≥60s per ENGINEERING_RULES §2. */
@@ -885,10 +904,23 @@ export function useLiveWorkspaceFirestore(
         void load();
       };
       window.addEventListener("focus", onFocus);
+      // Reload soon after this tab writes to a collection we show, so new
+      // labels / profiles / plans appear without a reload (QA 3.1). Debounced
+      // so a batch of writes triggers one reload.
+      let writeReload: ReturnType<typeof setTimeout> | undefined;
+      const unsubscribeWrites = subscribeToLocalDocumentWrites((root) => {
+        if (!LIVE_BULK_LOAD_COLLECTIONS.has(root)) return;
+        if (writeReload) clearTimeout(writeReload);
+        writeReload = setTimeout(() => {
+          void load();
+        }, 300);
+      });
       return () => {
         cancelled = true;
         window.clearInterval(intervalId);
         window.removeEventListener("focus", onFocus);
+        unsubscribeWrites();
+        if (writeReload) clearTimeout(writeReload);
       };
     }
 

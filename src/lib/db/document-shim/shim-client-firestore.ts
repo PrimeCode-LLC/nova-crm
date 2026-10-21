@@ -154,6 +154,56 @@ export async function getDoc(ref: DocumentReference): Promise<DocumentSnapshot> 
 const POLL_MS = 60_000;
 const POLL_ERROR_MS = 120_000;
 
+/**
+ * Active listeners keyed by collection path (and doc path for doc listeners).
+ * A write from this tab re-polls the affected listeners immediately, so lists
+ * show new rows without waiting for the 60s poll or a reload (QA 3.1).
+ */
+const listenersByPath = new Map<string, Set<() => void>>();
+
+function registerListener(path: string, kick: () => void): () => void {
+  let set = listenersByPath.get(path);
+  if (!set) {
+    set = new Set();
+    listenersByPath.set(path, set);
+  }
+  set.add(kick);
+  return () => {
+    set!.delete(kick);
+    if (set!.size === 0) listenersByPath.delete(path);
+  };
+}
+
+const writeSubscribers = new Set<(collectionRoot: string) => void>();
+
+/**
+ * Called after any successful document write from this tab with the written
+ * collection root, for loaders that poll many collections at once (QA 3.1).
+ */
+export function subscribeToLocalDocumentWrites(
+  fn: (collectionRoot: string) => void,
+): () => void {
+  writeSubscribers.add(fn);
+  return () => {
+    writeSubscribers.delete(fn);
+  };
+}
+
+function notifyDocumentChanged(docPath: string): void {
+  const parent = docPath.split("/").slice(0, -1).join("/");
+  for (const key of [docPath, parent]) {
+    listenersByPath.get(key)?.forEach((kick) => kick());
+  }
+  const root = docPath.split("/")[0] ?? "";
+  writeSubscribers.forEach((fn) => {
+    try {
+      fn(root);
+    } catch {
+      /* a subscriber must not break the write */
+    }
+  });
+}
+
 export function onSnapshot(
   ref: DocumentReference,
   onNext: (snap: DocumentSnapshot) => void,
@@ -173,9 +223,14 @@ export function onSnapshot(
   let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let inFlight = false;
+  let pendingKick = false;
 
   async function poll() {
-    if (cancelled || inFlight) return;
+    if (cancelled) return;
+    if (inFlight) {
+      pendingKick = true;
+      return;
+    }
     inFlight = true;
     let nextDelay = POLL_MS;
     try {
@@ -211,16 +266,33 @@ export function onSnapshot(
     } finally {
       inFlight = false;
       if (!cancelled) {
-        timer = setTimeout(() => {
+        if (pendingKick) {
+          pendingKick = false;
           void poll();
-        }, nextDelay);
+        } else {
+          timer = setTimeout(() => {
+            void poll();
+          }, nextDelay);
+        }
       }
     }
   }
 
+  const listenPath = isDocumentReference(target)
+    ? target.path
+    : target instanceof ClientQuery
+      ? target.col.path
+      : target.path;
+  const unregister = registerListener(listenPath, () => {
+    if (cancelled) return;
+    if (timer) clearTimeout(timer);
+    void poll();
+  });
+
   void poll();
   return () => {
     cancelled = true;
+    unregister();
     if (timer) clearTimeout(timer);
   };
 }
@@ -260,6 +332,7 @@ export async function deleteDoc(ref: DocumentReference): Promise<void> {
   if (!res.ok) {
     throw new Error(`workspace-documents DELETE failed (${res.status})`);
   }
+  notifyDocumentChanged(ref.path);
 }
 
 /**
@@ -304,6 +377,7 @@ export async function updateDoc(
   if (!res.ok) {
     throw new Error(`workspace-documents PATCH failed (${res.status})`);
   }
+  notifyDocumentChanged(ref.path);
 }
 
 export async function setDoc(
@@ -324,6 +398,7 @@ export async function setDoc(
   if (!res.ok) {
     throw new Error(`workspace-documents PUT failed (${res.status})`);
   }
+  notifyDocumentChanged(ref.path);
 }
 
 export async function addDoc(

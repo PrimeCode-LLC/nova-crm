@@ -369,8 +369,8 @@ export async function runDocumentTransaction<T>(
   if (!isDatabaseConfigured()) {
     throw new Error("DATABASE_URL is not configured");
   }
-  return withRlsBypass(async (tx) => {
-    const locked = new Set<string>();
+  const locked = new Set<string>();
+  const result = await withRlsBypass(async (tx) => {
     const lockOnce = async (path: string): Promise<void> => {
       if (locked.has(path)) return;
       locked.add(path);
@@ -432,6 +432,11 @@ export async function runDocumentTransaction<T>(
       },
     });
   });
+  // The in-transaction invalidation can be refilled by a concurrent read before
+  // commit (250ms single-flight cache); drop it again now that the write is
+  // visible, so a re-poll right after a save sees the new row (QA 3.1).
+  for (const path of locked) invalidateDocumentQueryCache(parsePath(path).collectionRoot);
+  return result;
 }
 
 export async function setDocument(
