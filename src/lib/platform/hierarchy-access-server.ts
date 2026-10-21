@@ -1,5 +1,6 @@
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
+import { listMembersServer } from "@/lib/platform/members-server";
 import { collectDescendantUserIds } from "@/lib/workspace-hierarchy";
 import type { User } from "@/lib/types";
 import type { DocumentData } from "@/lib/db/document-shim/shim-firestore";
@@ -19,6 +20,33 @@ function asUserMinimal(id: string, raw: DocumentData): User {
   };
 }
 
+/**
+ * users/{uid} docs written by older onboarding have no name/email, so the
+ * mapper falls back to the uid. Fill those from the org member record (QA 2.2)
+ * — a read-time fallback, no stored data is rewritten.
+ */
+async function withMemberNames(organizationId: string, users: User[]): Promise<User[]> {
+  const missing = users.filter((u) => !u.displayName.trim() || u.displayName === u.id || !u.email);
+  if (missing.length === 0) return users;
+  let members: Awaited<ReturnType<typeof listMembersServer>> = [];
+  try {
+    members = await listMembersServer(organizationId);
+  } catch {
+    return users;
+  }
+  const byUid = new Map(members.map((m) => [m.uid, m]));
+  return users.map((u) => {
+    const m = byUid.get(u.id);
+    if (!m) return u;
+    const name = u.displayName.trim() && u.displayName !== u.id ? u.displayName : m.displayName?.trim();
+    return {
+      ...u,
+      displayName: name || u.displayName,
+      email: u.email || m.email || "",
+    };
+  });
+}
+
 /** Short in-process TTL — Fluid Compute reuses instances; cuts repeated roster reads. */
 const ORG_USERS_CACHE_TTL_MS = 30_000;
 const orgUsersCache = new Map<string, { expiresAt: number; value: User[] }>();
@@ -34,9 +62,10 @@ export async function listOrgUsersServer(organizationId: string): Promise<User[]
     .collection(COLLECTIONS.users)
     .where("organizationId", "==", organizationId)
     .get();
-  const value = snap.docs
-    .map((d) => asUserMinimal(d.id, d.data()))
-    .filter((u) => u.status === "active");
+  const value = await withMemberNames(
+    organizationId,
+    snap.docs.map((d) => asUserMinimal(d.id, d.data())).filter((u) => u.status === "active"),
+  );
 
   orgUsersCache.set(organizationId, {
     expiresAt: Date.now() + ORG_USERS_CACHE_TTL_MS,

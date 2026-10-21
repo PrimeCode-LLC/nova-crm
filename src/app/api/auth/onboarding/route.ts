@@ -83,8 +83,20 @@ export async function POST(req: Request) {
     invitedByUid: "owner-bootstrap",
   });
 
-  await db.collection("users").doc(session.uid).set(
+  // Name + email let teammates, notifications and booking emails show a
+  // person instead of the raw uid (QA 2.2). Never overwrite an existing name.
+  const userRef = db.collection("users").doc(session.uid);
+  const existingUser = (await userRef.get()).data() ?? {};
+  const profile: Record<string, unknown> = {};
+  if (!String(existingUser.displayName ?? "").trim() && (session.name ?? session.email)) {
+    profile.displayName = (session.name ?? session.email ?? "").trim();
+  }
+  if (!String(existingUser.email ?? "").trim() && session.email) {
+    profile.email = session.email.trim().toLowerCase();
+  }
+  await userRef.set(
     {
+      ...profile,
       organizationId: created.id,
       orgRole: "owner",
       roleId: "director",

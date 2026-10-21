@@ -65,6 +65,7 @@ import { persistBulkOwnerReassignClient } from "@/lib/documents/persist-bulk-own
 import type { BulkOwnerReassignItem } from "@/lib/documents/persist-bulk-owner-reassign-client";
 import { createUserNotifications, actorLabel } from "@/lib/notifications/create-user-notification";
 import { buildOwnershipHandoffNotifications } from "@/lib/notifications/ownership-handoff";
+import { resolveOwnerDisplayName, withMemberDisplayName } from "@/lib/member-display-name";
 import { persistUserNotificationDismiss } from "@/lib/notifications/persist-user-notification-client";
 import { useDemoUserNotifications } from "@/stores/demo-user-notifications-store";
 import { persistAccountPatchClient } from "@/lib/documents/persist-account-patch-client";
@@ -3001,7 +3002,8 @@ export function WorkspaceModeProvider({
     ];
     const nextUsers = tenantBaseSnapshot.users.map((u) => {
       const patch = userPatches[u.id];
-      return patch ? { ...u, ...patch } : u;
+      // users/{uid} may lack a name (older onboarding): use the member record.
+      return withMemberDisplayName(patch ? { ...u, ...patch } : u, orgMemberLabels);
     });
     const prevUsers = stableUsersMergedRef.current;
     const usersMerged =
@@ -3055,6 +3057,7 @@ export function WorkspaceModeProvider({
     contactsAdded,
     leadsAdded,
     userPatches,
+    orgMemberLabels,
     accountContactBumps,
     labelDelta,
   ]);
@@ -3145,11 +3148,7 @@ export function WorkspaceModeProvider({
     const getAccountById = (id: string) =>
       lookup.getAccountById(id) ?? peekCrmEntity("accounts", id);
     const getOwnerDisplayName = (uid: string): string | undefined => {
-      const id = uid?.trim();
-      if (!id) return undefined;
-      const fromUser = snapshotWithIdle.users.find((u) => u.id === id)?.displayName?.trim();
-      if (fromUser) return fromUser;
-      return orgMemberLabels[id]?.trim() || undefined;
+      return resolveOwnerDisplayName(uid, snapshotWithIdle.users, orgMemberLabels);
     };
     const viewerRole: OrgMemberRole =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole ?? "member";
