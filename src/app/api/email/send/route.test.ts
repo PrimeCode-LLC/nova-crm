@@ -114,6 +114,12 @@ describe("/api/email/send send-time safety (QA 1.5)", () => {
     expect(m.sendOutboundMailServer).not.toHaveBeenCalled();
   });
 
+  it("rejects a body without a mailbox with 400 (QA 2.8 / ROB-06)", async () => {
+    const res = await send({ to: "x@nova.test", subject: "garbage" });
+    expect(res.status).toBe(400);
+    expect(m.sendOutboundMailServer).not.toHaveBeenCalled();
+  });
+
   it("returns 404 for an unknown mailbox id instead of sending", async () => {
     m.getMailboxProfileServer.mockResolvedValue(null);
     const res = await send(base);

@@ -32,6 +32,11 @@ export async function POST(req: Request) {
     }
 
     const mailboxId = String(b.mailboxId ?? "").trim();
+    // Every composer sends from a saved mailbox; a body without one is invalid
+    // input, not a missing resource (QA 2.8 / ROB-06).
+    if (!b || typeof b !== "object" || Array.isArray(b) || !mailboxId) {
+      return NextResponse.json({ ok: false, error: "mailboxId is required" }, { status: 400 });
+    }
     const resolved = await resolveMailboxDataOwnerUid({
       organizationId: g.ctx.session.organizationId,
       viewerUid: g.ctx.session.uid,

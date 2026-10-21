@@ -62,9 +62,19 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const guarded = await guardTenantApi();
   if (!guarded.ok) return guarded.response;
-  const parsed = createSchema.safeParse(await req.json().catch(() => ({})));
+  let json: unknown;
+  try {
+    json = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const parsed = createSchema.safeParse(json);
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+  // A draft needs some content; garbage objects used to create blank drafts (QA 2.8 / ROB-06).
+  if (!parsed.data.values && !parsed.data.form) {
+    return Response.json({ error: "values or form is required" }, { status: 400 });
   }
   const draft = await createManualProspectDraft({
     organizationId: guarded.ctx.session.organizationId,

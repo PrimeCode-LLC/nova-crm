@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
@@ -16,28 +17,32 @@ export async function GET() {
   return NextResponse.json({ ok: true, items });
 }
 
+const suppressionBodySchema = z.object({
+  email: z.string().trim().email().max(320),
+  reason: z.enum(["unsubscribe", "hard_bounce", "complaint", "manual"]).optional(),
+  leadId: z.string().trim().min(1).max(128).optional(),
+});
+
 export async function POST(req: Request) {
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
-  const body = (await req.json().catch(() => null)) as {
-    email?: string;
-    reason?: SuppressionReason;
-    leadId?: string;
-  } | null;
-  const email = body?.email?.trim() ?? "";
-  const reason = body?.reason ?? "manual";
-  if (!email) {
-    return NextResponse.json({ ok: false, error: "email required" }, { status: 400 });
+  // Validate shape first: a non-string email used to crash with a 500 (QA 2.8 / ROB-06).
+  const parsed = suppressionBodySchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { ok: false, error: "Provide a valid email and an optional reason (unsubscribe, hard_bounce, complaint, manual)." },
+      { status: 400 },
+    );
   }
-  if (!["unsubscribe", "hard_bounce", "complaint", "manual"].includes(reason)) {
-    return NextResponse.json({ ok: false, error: "invalid reason" }, { status: 400 });
-  }
+  const body = parsed.data;
+  const email = body.email;
+  const reason: SuppressionReason = body.reason ?? "manual";
   const result = await addSuppression({
     organizationId: g.ctx.session.organizationId,
     email,
     reason,
     source: "manual",
-    leadId: body?.leadId,
+    leadId: body.leadId,
     createdBy: g.ctx.session.uid,
   });
   if (!("ok" in result) || !result.ok) {

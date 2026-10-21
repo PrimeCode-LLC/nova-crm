@@ -284,7 +284,10 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("[org/crm-write]", body.action, err);
     // Id already used (e.g. by a record in another workspace): don't leak Prisma text.
-    if ((err as { code?: unknown })?.code === "P2002") {
+    // An id owned by another workspace hits row-level security (42501) rather
+    // than a unique violation; same answer, no internals (QA 2.8 / ROB-06).
+    const rlsDenied = /row-level security|\b42501\b/i.test(String((err as Error)?.message ?? ""));
+    if ((err as { code?: unknown })?.code === "P2002" || rlsDenied) {
       return NextResponse.json(
         { ok: false, error: "A record with this id already exists." },
         { status: 409 },
