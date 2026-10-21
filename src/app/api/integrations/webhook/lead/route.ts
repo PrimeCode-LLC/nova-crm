@@ -4,6 +4,7 @@ import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { stampForCreate } from "@/lib/documents/tenant-write";
+import { ingestWebsiteLeadServer } from "@/lib/integrations/website-lead-ingest-server";
 
 const bodySchema = z.object({
   /** Tenant id this lead belongs to. Required (multi-tenant). */
@@ -79,14 +80,35 @@ export async function POST(req: Request) {
   const accepted = orgSecret ? presented === orgSecret : presented === fallbackSecret;
   if (!accepted) return unauthorized();
 
+  // Create the prospect now (nothing consumes ingestQueue — QA 2.1). The queue
+  // doc stays as the audit record of what the website sent.
+  let ingest: Awaited<ReturnType<typeof ingestWebsiteLeadServer>>;
+  try {
+    ingest = await ingestWebsiteLeadServer(parsed.data);
+  } catch (err) {
+    console.error("[webhook/lead] ingest failed", err);
+    ingest = { ok: false, error: "Could not create the lead." };
+  }
+
   const ref = await db.collection(COLLECTIONS.ingestQueue).add(
     stampForCreate(parsed.data.organizationId, {
       type: "website_lead",
       payload: parsed.data,
       receivedAt: FieldValue.serverTimestamp(),
-      status: "pending",
+      status: ingest.ok ? "processed" : "failed",
+      ...(ingest.ok
+        ? { leadId: ingest.leadId, duplicate: ingest.duplicate, processedAt: FieldValue.serverTimestamp() }
+        : { error: ingest.error }),
     }),
   );
 
-  return NextResponse.json({ ok: true, id: ref.id });
+  if (!ingest.ok) {
+    return NextResponse.json({ ok: false, id: ref.id, error: ingest.error }, { status: 422 });
+  }
+  return NextResponse.json({
+    ok: true,
+    id: ref.id,
+    leadId: ingest.leadId,
+    duplicate: ingest.duplicate,
+  });
 }
