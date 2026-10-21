@@ -44,12 +44,12 @@ function as(uid: string) {
 
 function graph(suffix: string, ownerId: string) {
   return {
-    account: { id: `a-${suffix}`, doc: { name: `Co ${suffix}`, ownerId, createdAt: now, updatedAt: now } },
-    contact: { id: `ct-${suffix}`, doc: { firstName: "C", lastName: suffix, fullName: `C ${suffix}`, accountId: `a-${suffix}`, ownerId, createdAt: now, updatedAt: now } },
+    account: { id: `qa18-a-${suffix}`, doc: { name: `Co ${suffix}`, ownerId, createdAt: now, updatedAt: now } },
+    contact: { id: `qa18-ct-${suffix}`, doc: { firstName: "C", lastName: suffix, fullName: `C ${suffix}`, accountId: `qa18-a-${suffix}`, ownerId, createdAt: now, updatedAt: now } },
     lead: {
-      id: `l-${suffix}`,
+      id: `qa18-l-${suffix}`,
       doc: {
-        accountId: `a-${suffix}`, contactId: `ct-${suffix}`, companyName: `Co ${suffix}`, contactName: `C ${suffix}`,
+        accountId: `qa18-a-${suffix}`, contactId: `qa18-ct-${suffix}`, companyName: `Co ${suffix}`, contactName: `C ${suffix}`,
         channel: "cold_email", stage: "new", temperature: "cold", priority: "medium",
         ownerId, touches: 0, isIdle: false, createdAt: now, updatedAt: now,
       },
@@ -95,7 +95,7 @@ describe.skipIf(!runDb)("CRM paths through workspace-documents (QA 1.8)", () => 
     }
     await upsertLeadGraphPostgres(ORG, graph("mine", REP));
     await upsertLeadGraphPostgres(ORG, graph("theirs", OTHER));
-  });
+  }, 60_000); // several DB writes; the default 10 s hook limit flakes under full-suite load
 
   afterAll(async () => {
     try {
@@ -103,46 +103,46 @@ describe.skipIf(!runDb)("CRM paths through workspace-documents (QA 1.8)", () => 
     } finally {
       await disconnectPrisma();
     }
-  });
+  }, 60_000);
 
   it("a salesperson cannot read or edit a colleague's lead by path", async () => {
     as(REP);
-    expect((await getPath("leads/l-theirs")).status).toBe(404);
-    expect((await getPath("accounts/a-theirs")).status).toBe(404);
-    expect((await patchPath("leads/l-theirs", { stage: "lost" })).status).toBe(404);
-    expect((await patchPath("leads/l-theirs", { ownerId: REP })).status).toBe(404);
-    const del = await DELETE(new Request("http://localhost/x", { method: "DELETE", body: JSON.stringify({ path: "leads/l-theirs" }) }));
+    expect((await getPath("leads/qa18-l-theirs")).status).toBe(404);
+    expect((await getPath("accounts/qa18-a-theirs")).status).toBe(404);
+    expect((await patchPath("leads/qa18-l-theirs", { stage: "lost" })).status).toBe(404);
+    expect((await patchPath("leads/qa18-l-theirs", { ownerId: REP })).status).toBe(404);
+    const del = await DELETE(new Request("http://localhost/x", { method: "DELETE", body: JSON.stringify({ path: "leads/qa18-l-theirs" }) }));
     expect(del.status).toBe(403);
-    const lead = await getLeadFromPostgres(ORG, "l-theirs");
+    const lead = await getLeadFromPostgres(ORG, "qa18-l-theirs");
     expect(lead).toMatchObject({ stage: "new", ownerId: OTHER });
   });
 
   it("a salesperson still reads, lists and edits their own lead", async () => {
     as(REP);
-    expect((await getPath("leads/l-mine")).status).toBe(200);
+    expect((await getPath("leads/qa18-l-mine")).status).toBe(200);
     const list = (await (await getList("leads")).json()) as { docs: { id: string }[] };
-    expect(list.docs.map((d) => d.id)).toEqual(["l-mine"]);
+    expect(list.docs.map((d) => d.id)).toEqual(["qa18-l-mine"]);
     const accounts = (await (await getList("accounts")).json()) as { docs: { id: string }[] };
-    expect(accounts.docs.map((d) => d.id)).toEqual(["a-mine"]);
+    expect(accounts.docs.map((d) => d.id)).toEqual(["qa18-a-mine"]);
     const contacts = (await (await getList("contacts")).json()) as { docs: { id: string }[] };
-    expect(contacts.docs.map((d) => d.id)).toEqual(["ct-mine"]);
-    expect((await patchPath("leads/l-mine", { stage: "contacted" })).status).toBe(200);
-    expect((await getLeadFromPostgres(ORG, "l-mine"))?.stage).toBe("contacted");
+    expect(contacts.docs.map((d) => d.id)).toEqual(["qa18-ct-mine"]);
+    expect((await patchPath("leads/qa18-l-mine", { stage: "contacted" })).status).toBe(200);
+    expect((await getLeadFromPostgres(ORG, "qa18-l-mine"))?.stage).toBe("contacted");
   });
 
   it("a role without the CRM modules gets nothing (PERM-03)", async () => {
     as(CONTENT);
-    expect((await getPath("leads/l-mine")).status).toBe(404);
+    expect((await getPath("leads/qa18-l-mine")).status).toBe(404);
     const list = (await (await getList("leads")).json()) as { docs: unknown[] };
     expect(list.docs).toEqual([]);
-    expect((await patchPath("leads/l-mine", { stage: "lost" })).status).toBe(403);
+    expect((await patchPath("leads/qa18-l-mine", { stage: "lost" })).status).toBe(403);
   });
 
   it("the owner sees and edits every lead", async () => {
     as(OWNER);
-    expect((await getPath("leads/l-theirs")).status).toBe(200);
+    expect((await getPath("leads/qa18-l-theirs")).status).toBe(200);
     const list = (await (await getList("leads")).json()) as { docs: { id: string }[] };
-    expect(list.docs.map((d) => d.id).sort()).toEqual(["l-mine", "l-theirs"]);
-    expect((await patchPath("leads/l-theirs", { priority: "high" })).status).toBe(200);
+    expect(list.docs.map((d) => d.id).sort()).toEqual(["qa18-l-mine", "qa18-l-theirs"]);
+    expect((await patchPath("leads/qa18-l-theirs", { priority: "high" })).status).toBe(200);
   });
 });
