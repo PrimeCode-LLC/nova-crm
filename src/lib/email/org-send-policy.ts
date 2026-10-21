@@ -1,5 +1,10 @@
 import { addUtcDayKey } from "@/lib/email/mailbox-schedule-capacity";
-import { getZonedParts, resolveOrgTimezone, zonedWallTimeToUtc } from "@/lib/org-timezone";
+import {
+  getZonedParts,
+  resolveOrgTimezone,
+  zonedDayKey,
+  zonedWallTimeToUtc,
+} from "@/lib/org-timezone";
 import { DEFAULT_WEEKLY_AVAILABILITY, WEEKDAY_KEYS } from "@/lib/scheduling/defaults";
 import type {
   AvailabilityTimeSlot,
@@ -178,3 +183,44 @@ export function addOrgWorkingDays(
   }
   return key;
 }
+
+function slotMinutes(hm: string): { h: number; m: number } {
+  const [h, m] = hm.split(":").map(Number);
+  return { h: h ?? 0, m: m ?? 0 };
+}
+
+/**
+ * When the workspace send window is next open: `null` when it is open now
+ * (or no opening is found within two weeks — never block mail forever), else
+ * the instant it opens. Used to defer scheduled mail at send time (QA 3.5).
+ */
+export function nextOrgSendWindowOpening(
+  policy: OrgEmailSendPolicy,
+  timeZone: string | null | undefined,
+  now: Date = new Date(),
+): Date | null {
+  const zone = resolveOrgTimezone(timeZone);
+  const nowMs = now.getTime();
+  const today = zonedDayKey(now, zone);
+  for (let i = 0; i < 14; i += 1) {
+    const dayKey = i === 0 ? today : addUtcDayKey(today, i);
+    const slots = [...(policy.weekly[weekdayKeyFromDayKey(dayKey, zone)] ?? [])].sort((a, b) =>
+      a.start.localeCompare(b.start),
+    );
+    if (slots.length === 0) {
+      if (policy.weekdayOnly) continue;
+      // Not restricted to listed days: an unlisted day is open all day.
+      return i === 0 ? null : zonedWallTimeToUtc(dayKey, 0, 0, 0, 0, zone);
+    }
+    for (const slot of slots) {
+      const s = slotMinutes(slot.start);
+      const e = slotMinutes(slot.end);
+      const start = zonedWallTimeToUtc(dayKey, s.h, s.m, 0, 0, zone).getTime();
+      const end = zonedWallTimeToUtc(dayKey, e.h, e.m, 0, 0, zone).getTime();
+      if (nowMs >= start && nowMs < end) return null;
+      if (start > nowMs) return new Date(start);
+    }
+  }
+  return null;
+}
+

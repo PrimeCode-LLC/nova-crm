@@ -49,6 +49,7 @@ import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manag
 import { stampForCreate } from "@/lib/documents/tenant-write";
 import { incrementOrgSendLedgerServer } from "@/lib/email/org-send-ledger-server";
 import { isSuppressed } from "@/lib/email/suppression-server";
+import { sendWindowDeferMessage, sendWindowDeferUntilServer } from "@/lib/email/send-window-server";
 import { isQueueHeavyJobsV1Enabled, isScheduledEmailPgV1Enabled } from "@/lib/queue/flags";
 import { enqueueScheduledEmailJob } from "@/lib/queue/enqueue";
 
@@ -69,6 +70,7 @@ export type ScheduledSkipReason =
   | "contact_policy"
   | "suppressed"
   | "mailbox_disabled"
+  | "send_window"
   | "other";
 
 export type ScheduledFlushRowResult = {
@@ -98,6 +100,7 @@ function emptySkipReasons(): Record<ScheduledSkipReason, number> {
     contact_policy: 0,
     suppressed: 0,
     mailbox_disabled: 0,
+    send_window: 0,
     other: 0,
   };
 }
@@ -1167,6 +1170,30 @@ async function sendScheduledDoc(
       "mailbox_disabled",
       "Mailbox is disabled.",
     );
+  }
+
+  // Outside the workspace send window: keep it pending until the next opening
+  // (scheduledAt unchanged; notBeforeAt gates readiness) — QA 3.5 / SEND-06.
+  const windowOpensAt = await sendWindowDeferUntilServer(organizationId);
+  if (windowOpensAt) {
+    const message = sendWindowDeferMessage(windowOpensAt);
+    await docRef.update({
+      status: "pending",
+      notBeforeAt: windowOpensAt.toISOString(),
+      lastSkipReason: "send_window",
+      error: message,
+      updatedAt: new Date().toISOString(),
+      processingAt: FieldValue.delete(),
+      processingClaimId: FieldValue.delete(),
+    });
+    if (followupIdEarly) {
+      await updateFollowupDeliveryState(followupIdEarly, {
+        deliveryStatus: "scheduled",
+        keepSchedule: true,
+        nextRetryAt: windowOpensAt.toISOString(),
+      });
+    }
+    return { outcome: "skipped", reason: "send_window", detail: message };
   }
 
   console.log(`[scheduled-send] Mailbox verified: "${mailbox.emailAddress}" (host: "${mailbox.smtp.host}:${mailbox.smtp.port}", user: "${mailbox.smtp.user ? "configured" : "empty"}", owner: "${mailboxOwnerUid}")`);

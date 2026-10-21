@@ -42,6 +42,7 @@ import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 import { createUserNotificationServer } from "@/lib/notifications/create-user-notification-server";
 import { recordEmailEvent } from "@/lib/email/email-events-server";
 import { isSuppressed } from "@/lib/email/suppression-server";
+import { sendWindowDeferMessage, sendWindowDeferUntilServer } from "@/lib/email/send-window-server";
 import { signUnsubscribeToken, unsubscribeUrl } from "@/lib/email/unsubscribe-token";
 import {
   getScheduledEmailById,
@@ -284,6 +285,29 @@ export async function sendClaimedScheduledEmailPg(
       });
     }
     return { outcome: "skipped", reason: "mailbox_disabled", detail: "mailbox_disabled" };
+  }
+
+  // Outside the workspace send window: put it back as pending until the next
+  // opening; this is not a failure and uses no attempt (QA 3.5 / SEND-06).
+  const windowOpensAt = await sendWindowDeferUntilServer(organizationId);
+  if (windowOpensAt) {
+    const message = sendWindowDeferMessage(windowOpensAt);
+    await releaseClaimToPendingPg({
+      organizationId,
+      id: input.id,
+      leaseId: input.leaseId,
+      notBeforeAt: windowOpensAt,
+      lastSkipReason: "send_window",
+      error: message,
+      payload: { ...payload, nextRetryAt: windowOpensAt.toISOString() },
+    });
+    if (followupId) {
+      await updateFollowupDeliveryState(followupId, {
+        deliveryStatus: "scheduled",
+        emailScheduledAt: windowOpensAt.toISOString(),
+      });
+    }
+    return { outcome: "skipped", reason: "send_window", detail: message };
   }
 
   const quota = await reserveMailboxDailySendServer({

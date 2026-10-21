@@ -224,3 +224,39 @@ describe("capacity spill skips weekends", () => {
     expect(gapDays).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe("nextOrgSendWindowOpening (QA 3.5 / SEND-06)", () => {
+  // Mon–Fri 09:00–17:00 in the zone, weekdays only.
+  const policy = DEFAULT_ORG_SEND_POLICY;
+  const ny = "America/New_York";
+
+  it("is open (null) inside working hours", async () => {
+    const { nextOrgSendWindowOpening } = await import("@/lib/email/org-send-policy");
+    // Wed 21 Oct 2026, 10:00 EDT
+    expect(nextOrgSendWindowOpening(policy, ny, new Date("2026-10-21T14:00:00Z"))).toBeNull();
+  });
+
+  it("defers an evening send to 09:00 the next working day", async () => {
+    const { nextOrgSendWindowOpening } = await import("@/lib/email/org-send-policy");
+    // Wed 21 Oct 2026, 20:00 EDT → Thu 09:00 EDT
+    expect(nextOrgSendWindowOpening(policy, ny, new Date("2026-10-22T00:00:00Z"))?.toISOString()).toBe(
+      "2026-10-22T13:00:00.000Z",
+    );
+  });
+
+  it("skips the weekend", async () => {
+    const { nextOrgSendWindowOpening } = await import("@/lib/email/org-send-policy");
+    // Sat 24 Oct 2026, 11:00 EDT → Mon 26 Oct 09:00 EDT
+    expect(nextOrgSendWindowOpening(policy, ny, new Date("2026-10-24T15:00:00Z"))?.toISOString()).toBe(
+      "2026-10-26T13:00:00.000Z",
+    );
+  });
+
+  it("defers an early-morning send to the same day's opening", async () => {
+    const { nextOrgSendWindowOpening } = await import("@/lib/email/org-send-policy");
+    // Thu 22 Oct 2026, 06:30 EDT → 09:00 EDT
+    expect(nextOrgSendWindowOpening(policy, ny, new Date("2026-10-22T10:30:00Z"))?.toISOString()).toBe(
+      "2026-10-22T13:00:00.000Z",
+    );
+  });
+});
