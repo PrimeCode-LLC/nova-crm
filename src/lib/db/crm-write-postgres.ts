@@ -301,6 +301,28 @@ export async function deleteCrmEntityPostgres(
       return { ok: false as const, status: 403, error: "organization mismatch" };
     }
 
+    if (entity === "account") {
+      // Never orphan a company's records (QA 2.9 / CRM-05): refuse instead of
+      // cascading, so nothing is lost by accident.
+      const [contacts, leads, deals] = await Promise.all([
+        tx.contact.count({ where: { organizationId, accountId: id } }),
+        tx.lead.count({ where: { organizationId, accountId: id } }),
+        tx.deal.count({ where: { organizationId, accountId: id } }),
+      ]);
+      if (contacts + leads + deals > 0) {
+        const parts = [
+          contacts ? `${contacts} contact${contacts === 1 ? "" : "s"}` : "",
+          leads ? `${leads} lead${leads === 1 ? "" : "s"}` : "",
+          deals ? `${deals} deal${deals === 1 ? "" : "s"}` : "",
+        ].filter(Boolean);
+        return {
+          ok: false as const,
+          status: 409,
+          error: `This company still has ${parts.join(", ")}. Reassign or delete them first.`,
+        };
+      }
+    }
+
     switch (entity) {
       case "account":
         await tx.account.deleteMany({ where: { id, organizationId } });
