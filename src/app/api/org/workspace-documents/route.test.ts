@@ -15,8 +15,13 @@ vi.mock("@/lib/db/document-shim/store", () => ({
   deleteDocument: vi.fn(),
 }));
 
-import { GET, PATCH } from "./route";
-import { getDocument, queryDocuments, updateDocument } from "@/lib/db/document-shim/store";
+import { GET, PATCH, PUT } from "./route";
+import {
+  getDocument,
+  queryDocuments,
+  setDocument,
+  updateDocument,
+} from "@/lib/db/document-shim/store";
 
 function stored(path: string, payload: Record<string, unknown>): StoredDoc {
   return {
@@ -105,5 +110,75 @@ describe("/api/org/workspace-documents member scope", () => {
 
     expect(response.status).toBe(403);
     expect(updateDocument).not.toHaveBeenCalled();
+  });
+});
+
+describe("/api/org/workspace-documents notification privacy (QA 1.4)", () => {
+  function asOwner() {
+    guardTenantApi.mockResolvedValue({
+      ok: true,
+      ctx: {
+        session: { uid: "owner-1", organizationId: "org-1", email: "o@nova.test" },
+        adminAuth: null,
+        role: "owner",
+      },
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    asOwner();
+    vi.mocked(getDocument).mockImplementation(async (path: string) => {
+      if (path === "userNotifications/theirs") {
+        return stored(path, { recipientId: "olive", message: "for olive" });
+      }
+      if (path === "userNotifications/mine") {
+        return stored(path, { recipientId: "owner-1", message: "for me" });
+      }
+      return null;
+    });
+    vi.mocked(queryDocuments).mockResolvedValue([]);
+  });
+
+  it("lists only the viewer's own notifications, even for an owner", async () => {
+    await GET(new Request("https://nova.test/api/org/workspace-documents?collection=userNotifications"));
+    const filters = vi.mocked(queryDocuments).mock.calls[0][0].filters;
+    expect(filters).toContainEqual({ field: "recipientId", op: "==", value: "owner-1" });
+  });
+
+  it("refuses to read or mark another user's notification", async () => {
+    const read = await GET(
+      new Request("https://nova.test/api/org/workspace-documents?path=userNotifications%2Ftheirs"),
+    );
+    expect(read.status).toBe(403);
+    const patch = await PATCH(
+      new Request("https://nova.test/api/org/workspace-documents", {
+        method: "PATCH",
+        body: JSON.stringify({ path: "userNotifications/theirs", patch: { readAt: "now" } }),
+      }),
+    );
+    expect(patch.status).toBe(403);
+    expect(updateDocument).not.toHaveBeenCalled();
+  });
+
+  it("still allows marking your own and creating one addressed to a teammate", async () => {
+    const own = await PATCH(
+      new Request("https://nova.test/api/org/workspace-documents", {
+        method: "PATCH",
+        body: JSON.stringify({ path: "userNotifications/mine", patch: { readAt: "now" } }),
+      }),
+    );
+    expect(own.status).toBe(200);
+    const created = await PUT(
+      new Request("https://nova.test/api/org/workspace-documents", {
+        method: "PUT",
+        body: JSON.stringify({
+          path: "userNotifications/new-for-olive",
+          data: { recipientId: "olive", message: "assigned you a lead" },
+        }),
+      }),
+    );
+    expect(created.status).toBe(200);
+    expect(setDocument).toHaveBeenCalledTimes(1);
   });
 });

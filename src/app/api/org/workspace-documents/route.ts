@@ -14,6 +14,8 @@ import { projectWorkspaceListPayload } from "@/lib/db/document-shim/timestamp";
 import {
   MEMBER_SCOPED_WORKSPACE_COLLECTIONS,
   memberCanAccessWorkspaceDoc,
+  recipientScopeField,
+  viewerOwnsRecipientDoc,
   memberWorkspaceDocSlices,
   workspaceDocSeesAll,
 } from "@/lib/db/workspace-document-member-scope";
@@ -178,6 +180,16 @@ async function forbidIfMemberCannotAccessDoc(
   return null;
 }
 
+/** 403 when touching an existing row that is private to another person (QA 1.4). */
+function forbidIfNotRecipient(
+  ctx: TenantApiContext,
+  collectionRoot: string,
+  existingPayload: Record<string, unknown> | null | undefined,
+): NextResponse | null {
+  if (viewerOwnsRecipientDoc(collectionRoot, existingPayload, ctx.session.uid)) return null;
+  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+}
+
 export async function GET(req: Request) {
   const guard = await guardTenantApi();
   if (!guard.ok) return guard.response;
@@ -209,6 +221,8 @@ export async function GET(req: Request) {
         existing.payload,
       );
       if (memberDenied) return memberDenied;
+      const recipientDenied = forbidIfNotRecipient(guard.ctx, collectionRootOf(path), existing.payload);
+      if (recipientDenied) return recipientDenied;
       return NextResponse.json({
         docs: [
           {
@@ -290,8 +304,12 @@ export async function GET(req: Request) {
     const seesAll = await viewerSeesAllWorkspaceDocs(guard.ctx);
     const memberScoped =
       !seesAll && MEMBER_SCOPED_WORKSPACE_COLLECTIONS.has(collectionRoot);
+    const recipientField = recipientScopeField(collectionRoot);
     const baseFilters: QueryFilter[] = [
       { field: "organizationId", op: "==", value: organizationId },
+      ...(recipientField
+        ? [{ field: recipientField, op: "==" as const, value: guard.ctx.session.uid }]
+        : []),
     ];
     const order =
       orderByField != null
@@ -372,6 +390,12 @@ export async function PUT(req: Request) {
       existing?.payload ?? body.data,
     );
     if (memberDenied) return memberDenied;
+    const recipientDenied = forbidIfNotRecipient(
+      guard.ctx,
+      collectionRootOf(body.path),
+      existing?.payload,
+    );
+    if (recipientDenied) return recipientDenied;
 
     const data = {
       ...decodeClientFieldValues(body.data),
@@ -417,6 +441,12 @@ export async function PATCH(req: Request) {
       existing?.payload ?? null,
     );
     if (memberDenied) return memberDenied;
+    const recipientDenied = forbidIfNotRecipient(
+      guard.ctx,
+      collectionRootOf(body.path),
+      existing?.payload,
+    );
+    if (recipientDenied) return recipientDenied;
 
     await updateDocument(body.path, {
       ...decodeClientFieldValues(body.patch),
@@ -462,6 +492,12 @@ export async function DELETE(req: Request) {
       existing.payload,
     );
     if (memberDenied) return memberDenied;
+    const recipientDenied = forbidIfNotRecipient(
+      guard.ctx,
+      collectionRootOf(body.path),
+      existing.payload,
+    );
+    if (recipientDenied) return recipientDenied;
 
     await deleteDocument(body.path);
     return NextResponse.json({ ok: true });

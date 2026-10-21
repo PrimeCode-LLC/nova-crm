@@ -50,3 +50,27 @@ export function memberCanAccessWorkspaceDoc(
   const managers = payload.ownerManagerIds;
   return Array.isArray(managers) && managers.includes(uid);
 }
+
+/**
+ * Collections that are private to one person regardless of role (QA 1.4).
+ * Directors/owners do not see other users' rows; anyone may still create a
+ * row addressed to someone else (assignment / hand-off notifications).
+ */
+const RECIPIENT_SCOPED_FIELDS: Record<string, string> = {
+  userNotifications: "recipientId",
+};
+
+export function recipientScopeField(collection: string): string | null {
+  return RECIPIENT_SCOPED_FIELDS[collection] ?? null;
+}
+
+/** False when an existing row in a recipient-scoped collection belongs to someone else. */
+export function viewerOwnsRecipientDoc(
+  collection: string,
+  payload: Record<string, unknown> | null | undefined,
+  uid: string,
+): boolean {
+  const field = recipientScopeField(collection);
+  if (!field || !payload) return true;
+  return payload[field] === uid;
+}
