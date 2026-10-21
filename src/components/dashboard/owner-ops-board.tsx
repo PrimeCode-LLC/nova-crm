@@ -121,6 +121,7 @@ export function OwnerOpsBoard({
   orgWideScope = false,
   narrowLists = false,
   extraSentAts,
+  bounceAts,
 }: {
   metrics: DashboardWorkflowMetrics;
   leads: Lead[];
@@ -151,6 +152,7 @@ export function OwnerOpsBoard({
   narrowLists?: boolean;
   /** Compose / inbox / reply send timestamps for email volume. */
   extraSentAts?: readonly number[];
+  bounceAts?: readonly number[];
 }) {
   const wallSettings = wallPrefs ?? defaultWallPreferences();
   const needMeetings = Boolean(widgets.pulse || widgets.actionBoard || wall);
@@ -323,6 +325,7 @@ export function OwnerOpsBoard({
                 contacts={contacts}
                 tasks={tasks}
                 extraSentAts={extraSentAts}
+                bounceAts={bounceAts}
                 fill
               />
             </div>
@@ -477,6 +480,7 @@ export function OwnerOpsBoard({
                       contacts={contacts}
                       tasks={tasks}
                       extraSentAts={extraSentAts}
+                bounceAts={bounceAts}
                     />
                   ) : null}
                   {widgets.followupSchedule ? (

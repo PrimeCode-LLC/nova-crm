@@ -214,6 +214,28 @@ export type CrmWriteResult =
   | { ok: false; status: number; error: string };
 
 /** Full-document upsert (create or replace payload). */
+/**
+ * Closed deals: Won means 100% / Lost 0% unless this write sets a probability,
+ * and stamp wonAt / lostAt (QA 3.3 / CRM-04 — won deals kept e.g. 25%).
+ */
+export function applyDealCloseDefaults(
+  merged: Record<string, unknown>,
+  written: Record<string, unknown>,
+  nowIso: string,
+): void {
+  const stage = merged.stage;
+  if (stage !== "won" && stage !== "lost") return;
+  if (!("stage" in written)) return;
+  if (!("probability" in written)) merged.probability = stage === "won" ? 100 : 0;
+  if (stage === "won") {
+    if (!merged.wonAt) merged.wonAt = nowIso;
+    delete merged.lostAt;
+  } else {
+    if (!merged.lostAt) merged.lostAt = nowIso;
+    delete merged.wonAt;
+  }
+}
+
 export async function upsertCrmEntityPostgres(
   organizationId: string,
   entity: CrmEntity,
@@ -230,6 +252,7 @@ export async function upsertCrmEntityPostgres(
     createdAt:
       typeof doc.createdAt === "string" ? doc.createdAt : new Date().toISOString(),
   };
+  if (entity === "deal") applyDealCloseDefaults(data, doc, new Date().toISOString());
   // Validate row shape early (throws on missing organizationId — already set).
   rowFromDoc(entity, id, data);
 
@@ -275,6 +298,7 @@ export async function patchCrmEntityPostgres(
     if (!merged.createdAt) {
       merged.createdAt = new Date().toISOString();
     }
+    if (entity === "deal") applyDealCloseDefaults(merged, patch, merged.updatedAt as string);
 
     await upsertInTx(tx, entity, id, merged);
     return { ok: true as const };

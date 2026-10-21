@@ -32,6 +32,7 @@ export function EmailVolumeChart({
   contacts,
   tasks,
   extraSentAts,
+  bounceAts,
   compact,
   fill,
   timeZone: timeZoneProp,
@@ -42,6 +43,8 @@ export function EmailVolumeChart({
   tasks?: LeadTask[];
   /** Compose / inbox / reply send timestamps (ms). */
   extraSentAts?: readonly number[];
+  /** Server bounce times (KPI payload) — matches the "bounced" tile (QA 3.3). */
+  bounceAts?: readonly number[];
   compact?: boolean;
   /** Grow to fill the parent's height instead of a fixed chart height. */
   fill?: boolean;
@@ -58,6 +61,7 @@ export function EmailVolumeChart({
   const deferredContacts = React.useDeferredValue(contacts);
   const deferredTasks = React.useDeferredValue(tasks);
   const deferredExtraSentAts = React.useDeferredValue(extraSentAts);
+  const deferredBounceAts = React.useDeferredValue(bounceAts);
   const data = React.useMemo(
     () =>
       buildEmailVolumeSeries({
@@ -67,6 +71,7 @@ export function EmailVolumeChart({
         contacts: deferredContacts,
         tasks: deferredTasks,
         extraSentAts: deferredExtraSentAts,
+        bounceAts: deferredBounceAts,
         timeZone,
       }),
     [
@@ -76,6 +81,7 @@ export function EmailVolumeChart({
       deferredContacts,
       deferredTasks,
       deferredExtraSentAts,
+      deferredBounceAts,
       timeZone,
     ],
   );

@@ -6,6 +6,7 @@
  * loads tenant data once, scopes it, and computes aggregates (never returns rows).
  */
 
+import { collectEmailBounceTimes } from "@/lib/dashboard-ops-analytics";
 import {
   cacheDel,
   cacheGetJsonWithMeta,
@@ -98,6 +99,8 @@ export type DashboardKpisPayload = {
    * "Emails sent" tile counts, so the volume chart can match it (QA 2.6).
    */
   directSendAts?: number[];
+  /** Bounce times, last 90 days — same sources as the bounced tile (QA 3.3). */
+  bounceAts?: number[];
   meta: {
     updatedAt: string;
     source: "org-summary" | "scoped-compute" | "cache";
@@ -108,7 +111,7 @@ export type DashboardKpisPayload = {
 
 const DIRECT_SEND_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
-function recentDirectSendAts(ats: readonly number[] | undefined): number[] {
+function recentInstants(ats: readonly number[] | undefined): number[] {
   const cutoff = Date.now() - DIRECT_SEND_WINDOW_MS;
   return (ats ?? []).filter((at) => Number.isFinite(at) && at >= cutoff).slice(-5000);
 }
@@ -529,7 +532,10 @@ export async function getDashboardKpisServer(
       closedRevenue: closed?.closedRevenue ?? computed.closedRevenue,
       wonDealCount: closed?.wonDealCount ?? computed.wonDealCount,
       person,
-      directSendAts: recentDirectSendAts(bundle.extraSentAts),
+      directSendAts: recentInstants(bundle.extraSentAts),
+      bounceAts: recentInstants(
+        collectEmailBounceTimes({ contacts: bundle.contacts, tasks: bundle.leadTasks }),
+      ),
       meta: {
         updatedAt: summary?.updatedAt ?? new Date().toISOString(),
         source: summary ? "org-summary" : "scoped-compute",

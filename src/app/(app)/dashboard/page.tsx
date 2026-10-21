@@ -1110,6 +1110,7 @@ export default function DashboardPage() {
                 orgWideScope={orgWideDashboardScope}
                 narrowLists={narrowCrmLists}
                 extraSentAts={chartSentAts}
+                bounceAts={kpiV2 && !isDemo ? dashboardKpis.payload?.bounceAts : undefined}
               />
             ) : frontlineLayout ? (
               <FrontlineBoard

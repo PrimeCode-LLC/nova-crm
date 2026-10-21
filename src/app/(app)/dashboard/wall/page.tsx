@@ -660,6 +660,7 @@ function DashboardWallPageInner() {
           orgWideScope
           narrowLists={narrowLists}
           extraSentAts={chartSentAts}
+                bounceAts={kpiV2 && !isDemo ? dashboardKpis.payload?.bounceAts : undefined}
         />
       </div>
     </div>

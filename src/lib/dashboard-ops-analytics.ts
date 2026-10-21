@@ -191,6 +191,8 @@ export function buildEmailVolumeSeries(input: {
   timelineByLead?: Record<string, readonly TimelineEvent[]>;
   /** Compose / inbox / reply send timestamps (ms), excluding sequence followups. */
   extraSentAts?: readonly number[];
+  /** Server-computed bounce times; when set, used instead of contacts/tasks (QA 3.3). */
+  bounceAts?: readonly number[];
   timeZone?: string;
 }): EmailVolumePoint[] {
   const now = input.now ?? new Date();
@@ -256,14 +258,17 @@ export function buildEmailVolumeSeries(input: {
   }
   // Prefer contacts/tasks for chart series — timeline is capped (~400) and incomplete for month views.
   // When either array is provided (even empty), skip timeline so we don't mix incomplete sources.
-  for (const t of collectEmailBounceTimes({
-    contacts: input.contacts,
-    tasks: input.tasks,
-    timelineByLead:
-      input.contacts !== undefined || input.tasks !== undefined
-        ? undefined
-        : input.timelineByLead,
-  })) {
+  const bounceTimes =
+    input.bounceAts ??
+    collectEmailBounceTimes({
+      contacts: input.contacts,
+      tasks: input.tasks,
+      timelineByLead:
+        input.contacts !== undefined || input.tasks !== undefined
+          ? undefined
+          : input.timelineByLead,
+    });
+  for (const t of bounceTimes) {
     bump(bounces, t);
   }
 
