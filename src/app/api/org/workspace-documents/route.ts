@@ -20,6 +20,7 @@ import {
   workspaceDocSeesAll,
 } from "@/lib/db/workspace-document-member-scope";
 import { COLLECTIONS } from "@/lib/documents/collections";
+import { crmDocAccessDenied, filterCrmDocsForViewer, type CrmDocOp } from "@/lib/db/crm-document-access";
 import { guardTenantApi, type TenantApiContext } from "@/lib/platform/tenant-api-guard";
 
 /**
@@ -180,6 +181,17 @@ async function forbidIfMemberCannotAccessDoc(
   return null;
 }
 
+/** CRM rows get crm-write's module + record-scope checks (QA 1.8). */
+async function forbidCrmDoc(
+  ctx: TenantApiContext,
+  path: string,
+  op: CrmDocOp,
+  input: { existing: Record<string, unknown> | null; patch?: Record<string, unknown> },
+): Promise<NextResponse | null> {
+  const denied = await crmDocAccessDenied(ctx, path, op, input);
+  return denied ? NextResponse.json({ error: denied.error }, { status: denied.status }) : null;
+}
+
 /** 403 when touching an existing row that is private to another person (QA 1.4). */
 function forbidIfNotRecipient(
   ctx: TenantApiContext,
@@ -223,6 +235,8 @@ export async function GET(req: Request) {
       if (memberDenied) return memberDenied;
       const recipientDenied = forbidIfNotRecipient(guard.ctx, collectionRootOf(path), existing.payload);
       if (recipientDenied) return recipientDenied;
+      const crmDenied = await forbidCrmDoc(guard.ctx, path, "read", { existing: existing.payload });
+      if (crmDenied) return crmDenied;
       return NextResponse.json({
         docs: [
           {
@@ -336,7 +350,8 @@ export async function GET(req: Request) {
           ...limitOpt,
         });
 
-    const projected = docs.flatMap((d) => {
+    const visibleDocs = await filterCrmDocsForViewer(guard.ctx, collectionRoot, docs);
+    const projected = visibleDocs.flatMap((d) => {
       try {
         return [
           {
@@ -396,6 +411,11 @@ export async function PUT(req: Request) {
       existing?.payload,
     );
     if (recipientDenied) return recipientDenied;
+    const crmDenied = await forbidCrmDoc(guard.ctx, body.path, "upsert", {
+      existing: existing?.payload ?? null,
+      patch: body.data,
+    });
+    if (crmDenied) return crmDenied;
 
     const data = {
       ...decodeClientFieldValues(body.data),
@@ -447,6 +467,11 @@ export async function PATCH(req: Request) {
       existing?.payload,
     );
     if (recipientDenied) return recipientDenied;
+    const crmDenied = await forbidCrmDoc(guard.ctx, body.path, "patch", {
+      existing: existing?.payload ?? null,
+      patch: body.patch,
+    });
+    if (crmDenied) return crmDenied;
 
     await updateDocument(body.path, {
       ...decodeClientFieldValues(body.patch),
@@ -498,6 +523,8 @@ export async function DELETE(req: Request) {
       existing.payload,
     );
     if (recipientDenied) return recipientDenied;
+    const crmDenied = await forbidCrmDoc(guard.ctx, body.path, "delete", { existing: existing.payload });
+    if (crmDenied) return crmDenied;
 
     await deleteDocument(body.path);
     return NextResponse.json({ ok: true });
