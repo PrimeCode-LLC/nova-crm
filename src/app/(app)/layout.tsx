@@ -34,21 +34,29 @@ export default async function AppLayout({
   children: React.ReactNode;
 }) {
   const session = await requireSession();
-  if (!isAuthDisabled()) {
-    try {
-      const m = await findMembershipForUserServer(session.uid);
-      if (m?.status === "pending") {
-        redirect("/join/pending");
-      }
-    } catch {
-      /* allow app shell if membership lookup fails */
-    }
-  }
   const showPlatformLink =
     isAuthDisabled() ||
     (await isUserPlatformAdmin(session.uid, session.email));
   const jar = await cookies();
   const initialMode = parseWorkspaceMode(jar.get(WORKSPACE_MODE_COOKIE)?.value);
+  if (!isAuthDisabled()) {
+    // redirect() throws, so decide inside try and redirect outside it
+    // (it was previously swallowed by the catch — QA 2.4 / AUTH-05).
+    let membership: "pending" | "none" | "ok" = "ok";
+    try {
+      const m = await findMembershipForUserServer(session.uid);
+      if (m?.status === "pending") membership = "pending";
+      else if (!m && !session.organizationId) membership = "none";
+    } catch {
+      /* allow app shell if membership lookup fails */
+    }
+    if (membership === "pending") redirect("/join/pending");
+    // Signed in without a workspace: every API answers 403, so send them to
+    // create one. Demo mode and platform admins keep the app shell.
+    if (membership === "none" && initialMode !== "demo" && !showPlatformLink) {
+      redirect("/onboarding");
+    }
+  }
   const initialDemoPersonaId = parseDemoPersonaId(jar.get(DEMO_PERSONA_COOKIE)?.value);
 
   let organizationName: string | undefined;
