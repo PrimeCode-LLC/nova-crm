@@ -128,7 +128,8 @@ export function NewDealDialog({
   currentUserId: string;
   /** When the signed-in user is not yet in `users`, resolves a label for the owner picker (workspace roster / org labels). */
   getOwnerDisplayName?: (uid: string) => string | undefined;
-  onCreate: (deal: Deal) => void;
+  /** May be async (live save); the dialog waits for it before navigating. */
+  onCreate: (deal: Deal) => void | Promise<void>;
 }) {
   const router = useRouter();
   const ws = useWorkspace();
@@ -201,7 +202,7 @@ export function NewDealDialog({
     }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const leadForSubmit = pickerLeads.find((l) => l.id === resolvedLeadId);
     if (!leadForSubmit) {
@@ -220,7 +221,7 @@ export function NewDealDialog({
     }
     const now = isoNow();
     const deal: Deal = {
-      id: `local-${crypto.randomUUID()}`,
+      id: ws.isDemo ? `local-${crypto.randomUUID()}` : `d-${crypto.randomUUID()}`,
       leadId: leadForSubmit.id,
       accountId: leadForSubmit.accountId,
       contactId: leadForSubmit.contactId,
@@ -241,7 +242,14 @@ export function NewDealDialog({
       createdAt: now,
       updatedAt: now,
     };
-    onCreate(deal);
+    try {
+      await onCreate(deal);
+    } catch (err) {
+      toast.error("Could not save deal", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
     if (deal.ownerId && deal.ownerId !== currentUserId) {
       const actor = actorLabel(users, currentUserId);
       void createUserNotification(

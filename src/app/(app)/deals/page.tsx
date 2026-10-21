@@ -28,6 +28,9 @@ import { Plus, Search, DollarSign, TrendingUp, Trophy, Target, ArrowUpDown } fro
 import { STAGES_BY_KEY } from "@/lib/constants";
 import type { Deal } from "@/lib/types";
 import { useLocalDeals } from "@/hooks/use-local-deals";
+import { useQueryClient } from "@tanstack/react-query";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { persistDealCreateClient } from "@/lib/documents/persist-deal-create-client";
 import { recordDealCreatedClient } from "@/lib/documents/audit-change-client";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +52,7 @@ export default function DealsPage() {
   const snapshotOff = isLiveCrmSnapshotDisabled(ws.isDemo);
   const [query, setQuery] = React.useState("");
   const { localDeals, addLocalDeal } = useLocalDeals();
+  const queryClient = useQueryClient();
   const crmPages = useCrmEntityPages({
     entity: "deals",
     enabled: !ws.isDemo,
@@ -61,8 +65,15 @@ export default function DealsPage() {
   const [newDealFormKey, setNewDealFormKey] = React.useState(0);
 
   const handleCreateDeal = React.useCallback(
-    (deal: Deal) => {
-      addLocalDeal(deal);
+    async (deal: Deal) => {
+      if (ws.isDemo || !ws.organizationId) {
+        addLocalDeal(deal);
+      } else {
+        // Live workspace: save on the server (QA 2.10 — was sessionStorage only).
+        await persistDealCreateClient(getClientDb(), ws.organizationId, deal);
+        void queryClient.invalidateQueries({ queryKey: ["org", "crm-pages", "deals"] });
+        void queryClient.invalidateQueries({ queryKey: ["org", "crm-counts"] });
+      }
       const lead = ws.getLeadById(deal.leadId);
       recordDealCreatedClient({
         dealId: deal.id,
@@ -85,7 +96,7 @@ export default function DealsPage() {
         });
       }
     },
-    [addLocalDeal, ws],
+    [addLocalDeal, queryClient, ws],
   );
 
   const wsDeals = React.useMemo(() => {
