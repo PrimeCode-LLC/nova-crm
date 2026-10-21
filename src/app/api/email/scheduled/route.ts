@@ -1,3 +1,4 @@
+import { plainTextToEmailHtml } from "@/lib/email/plain-text-email-html";
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { resolveMailboxDataOwnerUid, canMailboxSend, mailboxReadOnlyForClient } from "@/lib/email/mailbox-data-owner-server";
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
   const mailboxId = String(body.mailboxId ?? "").trim();
   const from = String(body.from ?? "").trim();
   const text = String(body.text ?? "");
-  const html = String(body.html ?? text.split("\n").map((l) => `<p>${l || "<br/>"}</p>`).join(""));
+  const html = String(body.html ?? plainTextToEmailHtml(text));
 
   const resolved = await resolveMailboxDataOwnerUid({
     organizationId: g.ctx.session.organizationId,

@@ -72,7 +72,8 @@ export function applyOrgDashboardSummaryToWorkflowMetrics(
       assign("sentInRange", window.sent);
       assign("repliesInRange", window.replies);
       assign("opensInRange", window.opens);
-      assign("bouncedEmailsInRange", window.bounced);
+      // Bounces are counted live (contacts + bounce-review tasks); the summary
+      // never computes them and always stores 0 (QA 2.6 / DASH-01).
     }
   }
 

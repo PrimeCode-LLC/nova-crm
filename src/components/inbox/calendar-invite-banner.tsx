@@ -1,5 +1,6 @@
 "use client";
 
+import { plainTextToEmailHtml } from "@/lib/email/plain-text-email-html";
 import * as React from "react";
 import { format } from "date-fns";
 import { Calendar, Check, HelpCircle, Loader2, X } from "lucide-react";
@@ -148,7 +149,7 @@ export function CalendarInviteBanner({
         to: input.to,
         subject: input.subject,
         text: input.body,
-        html: `<p>${input.body.replace(/\n/g, "<br/>")}</p>`,
+        html: plainTextToEmailHtml(input.body),
         inReplyTo: message.messageId,
         referenceIds: [
           ...(message.referenceIds ?? []),

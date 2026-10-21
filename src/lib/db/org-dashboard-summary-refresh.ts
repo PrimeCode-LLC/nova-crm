@@ -9,6 +9,7 @@
  * When QUEUE_HEAVY_JOBS_V1 is on, web tier enqueues only; otherwise Next `after()`.
  */
 
+import { serializePayloadValue } from "@/lib/db/document-shim/timestamp";
 import type { Deal as PrismaDeal } from "@/generated/prisma/client";
 import { getRedis } from "@/lib/cache/redis";
 import { isDashboardKpiSqlAggregatesEnabled } from "@/lib/dashboard-kpi-v2-flags";
@@ -153,7 +154,11 @@ async function loadFollowupsFromDocuments(organizationId: string): Promise<Follo
       .collection(COLLECTIONS.followups)
       .where("organizationId", "==", organizationId)
       .get();
-    return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as Followup[];
+    // Document reads revive *At fields as Timestamps; summary helpers expect ISO
+    // strings like the KPI loader (QA 2.6 — sequence sends were never counted).
+    return snap.docs.map(
+      (doc) => serializePayloadValue({ id: doc.id, ...doc.data() }) as unknown as Followup,
+    );
   } catch (err) {
     console.error(
       "[pg-dashboard-summary] followups load failed",

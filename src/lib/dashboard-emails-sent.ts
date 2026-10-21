@@ -6,12 +6,15 @@
  * `email_sent` without a followupId, or durable `emailSendEvents`).
  */
 
+import { coerceInstantMs } from "@/lib/db/document-shim/timestamp";
 import type { Followup, TimelineEvent } from "@/lib/types";
 
-function validTime(iso: string | undefined): number | undefined {
-  if (!iso) return undefined;
-  const value = new Date(iso).getTime();
-  return Number.isFinite(value) ? value : undefined;
+/**
+ * Server loads (document shim) return Timestamp objects, the browser gets ISO
+ * strings; `new Date(timestamp)` is NaN, so both must be accepted (QA 2.6).
+ */
+function validTime(value: unknown): number | undefined {
+  return coerceInstantMs(value) ?? undefined;
 }
 
 /** True when a timeline row is a compose/reply send (not a sequence step). */

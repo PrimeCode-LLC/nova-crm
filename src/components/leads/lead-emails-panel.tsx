@@ -1,5 +1,6 @@
 "use client";
 
+import { plainTextToEmailHtml } from "@/lib/email/plain-text-email-html";
 import * as React from "react";
 import Link from "next/link";
 import { Forward, Loader2, Mail, Paperclip, PenLine, RefreshCw, Reply, ReplyAll, Send, UserRound } from "lucide-react";
@@ -264,19 +265,8 @@ function resolveOutboundFrom(input: {
   return input.mailboxEmail?.trim() || input.fallbackEmail?.trim() || "";
 }
 
-function bodyToHtml(body: string): string {
-  return body
-    .split("\n")
-    .map((line) => {
-      const escaped = line
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-      return `<p>${escaped || "<br/>"}</p>`;
-    })
-    .join("");
-}
+/** Escaped, one <p> per line, URLs linked for click tracking (QA 2.6). */
+const bodyToHtml = plainTextToEmailHtml;
 
 function defaultScheduleDatetimeLocal(timeZone: string): string {
   return defaultScheduleInZone(undefined, timeZone);

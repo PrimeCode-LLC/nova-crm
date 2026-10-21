@@ -279,6 +279,18 @@ describe("channel mix + apply (P0.10)", () => {
     expect(next.overdueTasks).toBe(1);
     expect(next.waitingOnOthers).toBe(0);
   });
+
+  it("keeps the live bounce count; the summary never computes bounces (QA 2.6 / DASH-01)", async () => {
+    const { applyOrgDashboardSummaryToWorkflowMetrics } = await import("@/lib/dashboard-summary-apply");
+    const summary = {
+      id: "o", organizationId: "o", version: 1, updatedAt: "2026-10-21T00:00:00.000Z",
+      ranges: { "7d": { ...emptyOrgDashboardSummaryRangeMetrics(), sent: 8 } },
+    } as never;
+    const live = { sentInRange: 0, bouncedEmailsInRange: 1 } as never;
+    const next = applyOrgDashboardSummaryToWorkflowMetrics(live, summary, "7d");
+    expect(next.sentInRange).toBe(8);
+    expect(next.bouncedEmailsInRange).toBe(1);
+  });
 });
 
 describe("person task gauges (P0.11)", () => {

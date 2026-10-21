@@ -1,5 +1,6 @@
 "use client";
 
+import { plainTextToEmailHtml } from "@/lib/email/plain-text-email-html";
 import * as React from "react";
 import { CalendarClock, CheckCircle2, Circle, Loader2, MinusCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -906,7 +907,7 @@ export function BulkScheduleSequencesDialog({
                   displayName: mailbox.displayName,
                   subject,
                   text,
-                  html: `<p>${text.replace(/</g, "&lt;")}</p>`,
+                  html: plainTextToEmailHtml(text),
                   scheduledAt: probeAt,
                 }),
               });

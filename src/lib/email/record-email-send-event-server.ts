@@ -4,6 +4,7 @@
  */
 
 import { getAdminDb } from "@/lib/db/document-access/admin";
+import { coerceInstantMs } from "@/lib/db/document-shim/timestamp";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { stampForCreate } from "@/lib/documents/tenant-write";
 import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
@@ -23,10 +24,9 @@ export type EmailSendEvent = {
   subject?: string;
 };
 
-function validTime(iso: string | undefined): number | undefined {
-  if (!iso) return undefined;
-  const value = new Date(iso).getTime();
-  return Number.isFinite(value) ? value : undefined;
+/** sentAt is revived as a Timestamp by the document shim (QA 2.6). */
+function validTime(value: unknown): number | undefined {
+  return coerceInstantMs(value) ?? undefined;
 }
 
 /** Persist a compose/reply send so org summary + KPIs can count it. */
@@ -141,7 +141,7 @@ export async function loadEmailSendEventAtsFromServer(
     const ats: number[] = [];
     for (const doc of snap.docs) {
       const data = doc.data() as Record<string, unknown>;
-      const at = validTime(typeof data.sentAt === "string" ? data.sentAt : undefined);
+      const at = validTime(data.sentAt);
       if (at !== undefined) ats.push(at);
     }
     return ats;

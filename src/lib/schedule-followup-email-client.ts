@@ -1,3 +1,4 @@
+import { plainTextToEmailHtml } from "@/lib/email/plain-text-email-html";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import {
   appendGlobalEmailFooter,
@@ -6,14 +7,6 @@ import {
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { datetimeLocalInZone, resolveOrgTimezone } from "@/lib/org-timezone";
 import { isEmailAccountConfigured } from "@/stores/email-account-store";
-
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 export type ScheduleFollowupEmailInput = {
   followupId: string;
@@ -126,7 +119,7 @@ export async function scheduleFollowupEmailClient(
   }
 
   const text = outboundBody;
-  const html = outboundBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
+  const html = plainTextToEmailHtml(outboundBody);
   const owner = account.dataOwnerUid?.trim();
   const scheduleUrl = owner
     ? `/api/email/scheduled?forUser=${encodeURIComponent(owner)}`

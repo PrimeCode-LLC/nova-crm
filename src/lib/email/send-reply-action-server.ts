@@ -1,3 +1,4 @@
+import { plainTextToEmailHtml } from "@/lib/email/plain-text-email-html";
 import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
@@ -24,19 +25,8 @@ import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import type { ReplyActionCompletionOutcome } from "@/lib/leads/reply-action-completion-types";
 import { resolveReplyReviewAfterReplyActionServer } from "@/lib/leads/resolve-reply-review-after-reply-action-server";
 
-function bodyToHtml(body: string): string {
-  return body
-    .split("\n")
-    .map((line) => {
-      const escaped = line
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-      return `<p>${escaped || "<br/>"}</p>`;
-    })
-    .join("");
-}
+/** Escaped, one <p> per line, URLs linked for click tracking (QA 2.6). */
+const bodyToHtml = plainTextToEmailHtml;
 
 function mailboxSendReady(mailbox: {
   enabled?: boolean;

@@ -1,5 +1,6 @@
 "use client";
 
+import { plainTextToEmailHtml } from "@/lib/email/plain-text-email-html";
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1740,7 +1741,7 @@ export default function InboxWorkspace() {
     setSending(true);
     try {
       const text = composeBody;
-      const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
+      const html = plainTextToEmailHtml(composeBody);
       const url = appendMailDataOwnerParam("/api/email/send", composeMailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
@@ -1909,7 +1910,7 @@ export default function InboxWorkspace() {
     setSending(true);
     try {
       const text = composeBody;
-      const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
+      const html = plainTextToEmailHtml(composeBody);
       const url = appendMailDataOwnerParam("/api/email/scheduled", composeMailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
@@ -6089,14 +6090,6 @@ function resolveLeadForMailListRow(
     return matchEmails(collectMessageEmails(item as MailDraft));
   }
   return null;
-}
-
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function collectMessageEmails(message: MailDraft | MailSent | MailInbound) {

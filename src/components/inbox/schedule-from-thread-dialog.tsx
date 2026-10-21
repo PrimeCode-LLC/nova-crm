@@ -1,5 +1,6 @@
 "use client";
 
+import { plainTextToEmailHtml } from "@/lib/email/plain-text-email-html";
 import * as React from "react";
 import { addMinutes, format } from "date-fns";
 import { CalendarPlus, Loader2 } from "lucide-react";
@@ -208,7 +209,7 @@ export function ScheduleFromThreadDialog({
               to: attendeeEmail.trim(),
               subject: `Invitation: ${title.trim() || "Meeting"}`,
               text: body,
-              html: `<p>${body.replace(/\n/g, "<br/>")}</p>`,
+              html: plainTextToEmailHtml(body),
               inReplyTo: replyMessageId,
               referenceIds: replyReferenceIds,
               attachments: [

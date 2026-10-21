@@ -93,6 +93,11 @@ export type DashboardKpisPayload = {
   closedRevenue: number;
   wonDealCount: number;
   person: PersonDashboardTaskGauges | null;
+  /**
+   * Direct (compose/reply) send times, last 90 days — the same source the
+   * "Emails sent" tile counts, so the volume chart can match it (QA 2.6).
+   */
+  directSendAts?: number[];
   meta: {
     updatedAt: string;
     source: "org-summary" | "scoped-compute" | "cache";
@@ -100,6 +105,13 @@ export type DashboardKpisPayload = {
     orgWide: boolean;
   };
 };
+
+const DIRECT_SEND_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+
+function recentDirectSendAts(ats: readonly number[] | undefined): number[] {
+  const cutoff = Date.now() - DIRECT_SEND_WINDOW_MS;
+  return (ats ?? []).filter((at) => Number.isFinite(at) && at >= cutoff).slice(-5000);
+}
 
 export type ComputeDashboardKpisInput = {
   organizationId: string;
@@ -517,6 +529,7 @@ export async function getDashboardKpisServer(
       closedRevenue: closed?.closedRevenue ?? computed.closedRevenue,
       wonDealCount: closed?.wonDealCount ?? computed.wonDealCount,
       person,
+      directSendAts: recentDirectSendAts(bundle.extraSentAts),
       meta: {
         updatedAt: summary?.updatedAt ?? new Date().toISOString(),
         source: summary ? "org-summary" : "scoped-compute",

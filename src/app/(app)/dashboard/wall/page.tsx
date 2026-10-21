@@ -355,6 +355,12 @@ function DashboardWallPageInner() {
     range,
     previewRole: null,
   });
+  // Same direct-send source as the "Emails sent" tile (QA 2.6).
+  const serverDirectSendAts = dashboardKpis.payload?.directSendAts;
+  const chartSentAts = React.useMemo(
+    () => (kpiV2 && !isDemo && serverDirectSendAts ? serverDirectSendAts : composeSentAts),
+    [kpiV2, isDemo, serverDirectSendAts, composeSentAts],
+  );
   const dashboardSummary = useOrgDashboardSummary({
     enabled: !kpiV2 && !isDemo && !workspaceLoading,
     orgWideScope: orgWideDashboardScope,
@@ -653,7 +659,7 @@ function DashboardWallPageInner() {
           wallPrefs={wallPrefs}
           orgWideScope
           narrowLists={narrowLists}
-          extraSentAts={composeSentAts}
+          extraSentAts={chartSentAts}
         />
       </div>
     </div>

@@ -14,6 +14,7 @@ import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
 import { isSuppressed } from "@/lib/email/suppression-server";
+import { recordEmailEvent } from "@/lib/email/email-events-server";
 import { recordEmailSendEventServer } from "@/lib/email/record-email-send-event-server";
 import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 
@@ -239,6 +240,17 @@ export async function POST(req: Request) {
     } catch {
       /* send already succeeded; dashboard count can catch up on next recompute */
     }
+
+    // Durable delivery event like scheduled sends write (QA 2.6 / SEND-01).
+    void recordEmailEvent({
+      organizationId: g.ctx.session.organizationId,
+      type: "sent",
+      leadId,
+      mailboxId: mailboxId || undefined,
+      messageId: result.messageId,
+      recipient: recipients[0],
+      meta: { source: "smtp_send", recipientCount: recipients.length },
+    }).catch(() => undefined);
 
     if (leadId) {
       try {

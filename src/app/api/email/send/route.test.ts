@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   getMailboxProfileServer: vi.fn(),
   isSuppressed: vi.fn(),
   sendOutboundMailServer: vi.fn(),
+  recordEmailEvent: vi.fn(async () => ({ ok: true, id: "e1" })),
 }));
 
 vi.mock("@/lib/platform/tenant-api-guard", () => ({ guardTenantApi: m.guardTenantApi }));
@@ -13,6 +14,7 @@ vi.mock("@/lib/email/mailbox-profiles-server", () => ({
   getMailboxProfileServer: m.getMailboxProfileServer,
 }));
 vi.mock("@/lib/email/suppression-server", () => ({ isSuppressed: m.isSuppressed }));
+vi.mock("@/lib/email/email-events-server", () => ({ recordEmailEvent: m.recordEmailEvent }));
 vi.mock("@/lib/email/send-outbound-mail-server", () => ({
   sendOutboundMailServer: m.sendOutboundMailServer,
 }));
@@ -87,6 +89,14 @@ describe("/api/email/send send-time safety (QA 1.5)", () => {
     expect(smtp).toEqual({
       host: "smtp.saved.test", port: 465, secure: true, user: "vault-user", pass: "vault-pass",
     });
+  });
+
+  it("records an email_events sent row for a direct send (QA 2.6 / SEND-01)", async () => {
+    const res = await send({ ...base, leadId: "l-1" });
+    expect(res.status).toBe(200);
+    expect(m.recordEmailEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "sent", leadId: "l-1", mailboxId: "mb-1", recipient: "client@nova.test" }),
+    );
   });
 
   it("refuses a disabled mailbox (MBX-06)", async () => {

@@ -469,6 +469,13 @@ export default function DashboardPage() {
     orgWideScope: orgWideDashboardScope,
     previewRole: prefs.previewRole,
   });
+  // Chart uses the server's direct-send list (same as the "Emails sent" tile)
+  // instead of lead timeline rows, which miss sends not tied to a lead (QA 2.6).
+  const serverDirectSendAts = dashboardKpis.payload?.directSendAts;
+  const chartSentAts = React.useMemo(
+    () => (kpiV2 && !isDemo && serverDirectSendAts ? serverDirectSendAts : composeSentAts),
+    [kpiV2, isDemo, serverDirectSendAts, composeSentAts],
+  );
   const displayMetrics = React.useMemo(() => {
     if (kpiV2 && dashboardKpis.payload?.workflow) {
       return dashboardKpis.payload.workflow;
@@ -1102,7 +1109,7 @@ export default function DashboardPage() {
                 isDemo={isDemo}
                 orgWideScope={orgWideDashboardScope}
                 narrowLists={narrowCrmLists}
-                extraSentAts={composeSentAts}
+                extraSentAts={chartSentAts}
               />
             ) : frontlineLayout ? (
               <FrontlineBoard
