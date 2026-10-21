@@ -10,6 +10,7 @@ import {
   bookMeetingServer,
   getPublicLinkContextServer,
   getSlotsForPublicLinkServer,
+  isPublicSlotBookableServer,
 } from "@/lib/scheduling/scheduling-server";
 
 export async function GET(
@@ -107,9 +108,20 @@ export async function POST(
     locationDetails: link.locationDetails,
     source: "public_link",
     skipAccessCheck: true,
+    // Public visitors may only take a slot the page currently offers (QA 1.6).
+    assertSlotAvailable: async () =>
+      (await isPublicSlotBookableServer({
+        organizationId: organization.id,
+        link,
+        schedule: ctxData.schedule,
+        startAt: parsed.data.startAt,
+        endAt: parsed.data.endAt,
+      }))
+        ? null
+        : "That time is no longer available. Please pick another slot.",
   });
   if ("error" in r) {
-    return NextResponse.json({ ok: false, error: r.error }, { status: 400 });
+    return NextResponse.json({ ok: false, error: r.error }, { status: r.status ?? 400 });
   }
   return NextResponse.json({ ok: true, meeting: r.meeting }, { status: 201 });
 }

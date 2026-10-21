@@ -1,5 +1,7 @@
 import { FieldValue, Timestamp, type DocumentData } from "@/lib/db/document-shim/shim-firestore";
 import { getAdminDb } from "@/lib/db/document-access/admin";
+import { isDatabaseConfigured } from "@/lib/db/prisma";
+import { withRlsBypass } from "@/lib/db/tenant-scope";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 import { slugifyOrganizationName } from "@/lib/platform/slug";
@@ -607,6 +609,63 @@ export async function getSlotsForPublicLinkServer(input: {
   return { slots };
 }
 
+/**
+ * True when [startAt, endAt) is exactly one of the slots the public page offers
+ * right now (same slot generator as the GET, existing meetings re-read) — QA 1.6.
+ */
+export async function isPublicSlotBookableServer(input: {
+  organizationId: string;
+  link: SchedulingLink;
+  schedule: AvailabilitySchedule;
+  startAt: string;
+  endAt: string;
+}): Promise<boolean> {
+  const start = new Date(input.startAt).getTime();
+  const end = new Date(input.endAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+  const existing = await listMeetingsForHostServer(input.organizationId, input.link.hostId);
+  const s = new Date(start);
+  // Slots are generated per calendar day; check the neighbouring days too so a
+  // timezone offset between server and schedule cannot hide the slot.
+  for (const offset of [0, -1, 1]) {
+    const day = new Date(s.getFullYear(), s.getMonth(), s.getDate() + offset, 12);
+    const slots = generateSlotsForDate({
+      date: day,
+      schedule: input.schedule,
+      durationMin: input.link.durationMin,
+      bufferBeforeMin: input.link.bufferBeforeMin,
+      bufferAfterMin: input.link.bufferAfterMin,
+      existingMeetings: existing,
+    });
+    if (
+      slots.some(
+        (slot) =>
+          new Date(slot.startAt).getTime() === start && new Date(slot.endAt).getTime() === end,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Run check-then-create for one host's calendar under a Postgres advisory lock
+ * so two concurrent bookings cannot both pass the availability check.
+ */
+async function withHostBookingLock<T>(
+  organizationId: string,
+  hostId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (!isDatabaseConfigured()) return fn();
+  return withRlsBypass(async (tx) => {
+    const key = `meeting-host:${organizationId}:${hostId}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    return fn();
+  });
+}
+
 async function createTimelineForMeeting(
   meeting: Meeting,
   actorId?: string,
@@ -667,7 +726,15 @@ export async function bookMeetingServer(input: {
   sendClientGoogleInvite?: boolean;
   /** Organizer email for ICS (defaults to host email). */
   organizerEmail?: string;
-}): Promise<{ meeting: Meeting; googleErrors?: { hostId: string; error: string }[] } | { error: string }> {
+  /**
+   * Checked under the host booking lock right before the meeting is saved;
+   * return an error message to refuse (e.g. the slot is no longer free).
+   */
+  assertSlotAvailable?: () => Promise<string | null>;
+}): Promise<
+  | { meeting: Meeting; googleErrors?: { hostId: string; error: string }[] }
+  | { error: string; status?: number }
+> {
   const db = getAdminDb();
   if (!db) return { error: "Database not configured" };
 
@@ -709,26 +776,11 @@ export async function bookMeetingServer(input: {
             ? "Phone call"
             : "Meeting");
 
-  const googlePlaced = await insertGoogleEventsForHostsServer({
-    organizationId: input.organizationId,
-    hostIds,
-    primaryHostId: input.hostId,
-    summary: input.title.trim(),
-    description: input.attendeeNotes?.trim(),
-    location: locationLabel,
-    startAt: input.startAt,
-    endAt: input.endAt,
-    timezone: input.timezone,
-    clientAttendeeEmail: input.attendeeEmail.trim().toLowerCase(),
-    sendClientInviteOnPrimary: input.sendClientGoogleInvite !== false,
-  });
-
   const payload = {
     organizationId: input.organizationId,
     hostId: input.hostId,
     hostName,
     internalHostIds: hostIds.slice(1),
-    googleEventIdsByHost: googlePlaced.googleEventIdsByHost,
     bookedById: input.bookedById ?? "",
     bookedByName: input.bookedByName ?? "",
     leadId: input.leadId ?? "",
@@ -751,7 +803,32 @@ export async function bookMeetingServer(input: {
     updatedAt: FieldValue.serverTimestamp(),
   };
 
-  const ref = await db.collection(COLLECTIONS.meetings).add(payload);
+  const created = await withHostBookingLock(input.organizationId, input.hostId, async () => {
+    const refused = input.assertSlotAvailable ? await input.assertSlotAvailable() : null;
+    if (refused) return { refused };
+    return { ref: await db.collection(COLLECTIONS.meetings).add(payload) };
+  });
+  if (!created.ref) return { error: created.refused ?? "Slot unavailable", status: 409 };
+  const ref = created.ref;
+
+  // Google Calendar placement is slow (network): do it after the slot is held.
+  const googlePlaced = await insertGoogleEventsForHostsServer({
+    organizationId: input.organizationId,
+    hostIds,
+    primaryHostId: input.hostId,
+    summary: input.title.trim(),
+    description: input.attendeeNotes?.trim(),
+    location: locationLabel,
+    startAt: input.startAt,
+    endAt: input.endAt,
+    timezone: input.timezone,
+    clientAttendeeEmail: input.attendeeEmail.trim().toLowerCase(),
+    sendClientInviteOnPrimary: input.sendClientGoogleInvite !== false,
+  });
+
+  if (Object.keys(googlePlaced.googleEventIdsByHost ?? {}).length) {
+    await ref.update({ googleEventIdsByHost: googlePlaced.googleEventIdsByHost });
+  }
   const fresh = await ref.get();
   const meeting = docToMeeting(ref.id, fresh.data()!);
 
