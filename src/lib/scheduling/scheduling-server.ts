@@ -12,9 +12,14 @@ import { resolveOrgTimezone } from "@/lib/org-timezone";
 import {
   datesWithAvailability,
   generateSlotsForDate,
+  scheduleTimezone,
   type BookableSlot,
 } from "@/lib/scheduling/availability-slots";
-import { renderMeetingConfirmationEmail } from "@/lib/scheduling/meeting-email";
+import { zonedDayKey } from "@/lib/org-timezone";
+import {
+  renderMeetingCancellationEmail,
+  renderMeetingConfirmationEmail,
+} from "@/lib/scheduling/meeting-email";
 import { buildMeetingIcs } from "@/lib/scheduling/ics";
 import { insertGoogleEventsForHostsServer } from "@/lib/scheduling/google-calendar-events-server";
 import {
@@ -592,14 +597,13 @@ export async function getSlotsForPublicLinkServer(input: {
     linkSlug: input.linkSlug,
   });
   if ("error" in ctx) return ctx;
-  const day = new Date(`${input.dateYmd}T12:00:00`);
-  if (Number.isNaN(day.getTime())) return { error: "Invalid date" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dateYmd.trim())) return { error: "Invalid date" };
   const existing = await listMeetingsForHostServer(
     ctx.organization.id,
     ctx.link.hostId,
   );
   const slots = generateSlotsForDate({
-    date: day,
+    dateYmd: input.dateYmd.trim(),
     schedule: ctx.schedule,
     durationMin: ctx.link.durationMin,
     bufferBeforeMin: ctx.link.bufferBeforeMin,
@@ -624,29 +628,19 @@ export async function isPublicSlotBookableServer(input: {
   const end = new Date(input.endAt).getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
   const existing = await listMeetingsForHostServer(input.organizationId, input.link.hostId);
-  const s = new Date(start);
-  // Slots are generated per calendar day; check the neighbouring days too so a
-  // timezone offset between server and schedule cannot hide the slot.
-  for (const offset of [0, -1, 1]) {
-    const day = new Date(s.getFullYear(), s.getMonth(), s.getDate() + offset, 12);
-    const slots = generateSlotsForDate({
-      date: day,
-      schedule: input.schedule,
-      durationMin: input.link.durationMin,
-      bufferBeforeMin: input.link.bufferBeforeMin,
-      bufferAfterMin: input.link.bufferAfterMin,
-      existingMeetings: existing,
-    });
-    if (
-      slots.some(
-        (slot) =>
-          new Date(slot.startAt).getTime() === start && new Date(slot.endAt).getTime() === end,
-      )
-    ) {
-      return true;
-    }
-  }
-  return false;
+  // The slot's calendar day in the schedule's timezone (same as the page's ?date=).
+  const dateYmd = zonedDayKey(new Date(start), scheduleTimezone(input.schedule));
+  const slots = generateSlotsForDate({
+    dateYmd,
+    schedule: input.schedule,
+    durationMin: input.link.durationMin,
+    bufferBeforeMin: input.link.bufferBeforeMin,
+    bufferAfterMin: input.link.bufferAfterMin,
+    existingMeetings: existing,
+  });
+  return slots.some(
+    (slot) => new Date(slot.startAt).getTime() === start && new Date(slot.endAt).getTime() === end,
+  );
 }
 
 /**
@@ -868,6 +862,40 @@ export async function bookMeetingServer(input: {
   };
 }
 
+/** Tell the attendee (and guests) a meeting was cancelled, with an ICS CANCEL. */
+async function sendMeetingCancellationEmail(meeting: Meeting): Promise<void> {
+  const to = meeting.attendeeEmail?.trim();
+  if (!to) return;
+  const [org, orgUsers] = await Promise.all([
+    getOrganizationServer(meeting.organizationId),
+    listOrgUsersServer(meeting.organizationId),
+  ]);
+  if (!org) return;
+  const host = orgUsers.find((u) => u.id === meeting.hostId);
+  const hostName =
+    host?.displayName?.trim() || meeting.hostName?.trim() || host?.email?.split("@")[0] || "your host";
+  const email = renderMeetingCancellationEmail({ meeting, organization: org, hostDisplayName: hostName });
+  const organizerEmail = host?.email?.trim().toLowerCase() || "";
+  const ics = organizerEmail ? buildMeetingIcs(meeting, organizerEmail, { cancel: true }) : null;
+  for (const recipient of [to, ...(meeting.guestEmails ?? [])]) {
+    await sendSystemEmail({
+      to: recipient,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+      attachments: ics
+        ? [
+            {
+              filename: "cancel.ics",
+              contentType: "text/calendar; method=CANCEL",
+              content: Buffer.from(ics, "utf8"),
+            },
+          ]
+        : undefined,
+    });
+  }
+}
+
 export async function updateMeetingStatusServer(input: {
   organizationId: string;
   meetingId: string;
@@ -898,6 +926,12 @@ export async function updateMeetingStatusServer(input: {
   });
   const fresh = await ref.get();
   const meeting = docToMeeting(ref.id, fresh.data()!);
+
+  if (input.status === "cancelled" && existing.status !== "cancelled") {
+    await sendMeetingCancellationEmail(meeting).catch((err) => {
+      console.error("[scheduling] cancellation email failed", meeting.id, err);
+    });
+  }
 
   if (meeting.leadId && (input.status === "completed" || input.status === "cancelled")) {
     const type = input.status === "completed" ? "meeting_completed" : "meeting_cancelled";

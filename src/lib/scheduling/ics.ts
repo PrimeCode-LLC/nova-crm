@@ -46,7 +46,12 @@ function meetingLocationLabel(meeting: Meeting): string {
   );
 }
 
-export function buildMeetingIcs(meeting: Meeting, organizerEmail: string): string {
+export function buildMeetingIcs(
+  meeting: Meeting,
+  organizerEmail: string,
+  options?: { cancel?: boolean },
+): string {
+  const cancel = options?.cancel === true;
   const uid = meeting.inboundInviteUid?.trim() || `${meeting.id}@nova-crm`;
   const now = new Date().toISOString();
   const loc = meetingLocationLabel(meeting);
@@ -56,7 +61,7 @@ export function buildMeetingIcs(meeting: Meeting, organizerEmail: string): strin
     "VERSION:2.0",
     "PRODID:-//Nova CRM//Scheduling//EN",
     "CALSCALE:GREGORIAN",
-    "METHOD:REQUEST",
+    cancel ? "METHOD:CANCEL" : "METHOD:REQUEST",
     "BEGIN:VEVENT",
     `UID:${uid}`,
     `DTSTAMP:${formatIcsDate(now)}`,
@@ -67,8 +72,8 @@ export function buildMeetingIcs(meeting: Meeting, organizerEmail: string): strin
     `LOCATION:${escapeIcs(loc)}`,
     `ORGANIZER;CN=Nova CRM:mailto:${organizerEmail}`,
     `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${meeting.attendeeEmail}`,
-    "STATUS:CONFIRMED",
-    "SEQUENCE:0",
+    cancel ? "STATUS:CANCELLED" : "STATUS:CONFIRMED",
+    cancel ? "SEQUENCE:1" : "SEQUENCE:0",
     "END:VEVENT",
     "END:VCALENDAR",
   ];

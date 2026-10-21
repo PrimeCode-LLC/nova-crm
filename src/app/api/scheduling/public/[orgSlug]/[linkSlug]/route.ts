@@ -24,9 +24,8 @@ export async function GET(
     if ("error" in slots) {
       if (orgSlug === DEMO_ORG_SLUG) {
         const schedule = demoAvailabilitySchedule("demo-host");
-        const day = new Date(`${date}T12:00:00`);
         const demoSlots = generateSlotsForDate({
-          date: day,
+          dateYmd: date,
           schedule,
           durationMin: 15,
           bufferBeforeMin: 0,

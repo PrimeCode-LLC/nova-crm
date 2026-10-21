@@ -54,9 +54,8 @@ export async function GET(req: Request) {
     viewerUid: g.ctx.session.uid,
     hostId,
   });
-  const day = new Date(`${dateYmd}T12:00:00`);
   const slots = generateSlotsForDate({
-    date: day,
+    dateYmd,
     schedule,
     durationMin,
     bufferBeforeMin: bufferBefore,
