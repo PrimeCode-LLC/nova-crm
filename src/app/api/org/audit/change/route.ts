@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { recordAudit, type AuditEvent } from "@/lib/documents/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import { withAuditActor } from "@/lib/documents/audit-helpers";
-import { STAGES_BY_KEY } from "@/lib/constants";
-import type { PipelineStage } from "@/lib/types";
+import {
+  auditDealCreated,
+  auditDealStageChanged,
+  auditLeadCreated,
+  auditLeadStageChanged,
+} from "@/lib/documents/crm-change-audit-server";
 
 const pipelineStageSchema = z.enum([
   "new",
@@ -87,10 +91,6 @@ const bodySchema = z.discriminatedUnion("event", [
   strategyBody,
 ]);
 
-function stageLabel(stage: PipelineStage): string {
-  return STAGES_BY_KEY[stage]?.label ?? stage;
-}
-
 export async function POST(req: Request) {
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
@@ -111,75 +111,40 @@ export async function POST(req: Request) {
   const orgId = g.ctx.session.organizationId;
   const actorUid = g.ctx.session.uid;
 
+  const actor = { uid: actorUid, email: g.ctx.session.email };
+
   if (data.event === "lead.stage_changed") {
     const { leadId, leadName, prevStage, nextStage, tableName, channel } = data;
     if (prevStage === nextStage) {
       return NextResponse.json({ ok: true, skipped: true });
     }
-    const prevLabel = stageLabel(prevStage);
-    const nextLabel = stageLabel(nextStage);
-    const resolvedTable = tableName ?? "leads";
-
-    await recordAudit(
-      withAuditActor(g.ctx.session, {
-        organizationId: orgId,
-        actorUid,
-        event: "lead.stage_changed",
-        operation: "update",
-        tableName: resolvedTable,
-        fieldName: "stage",
-        message: `${resolvedTable === "prospects" ? "Prospect" : "Lead"} stage changed from ${prevLabel} to ${nextLabel}`,
-        prevValue: prevLabel,
-        updatedValue: nextLabel,
-        meta: {
-          leadId,
-          leadName,
-          prevStage,
-          nextStage,
-          prevValue: prevLabel,
-          updatedValue: nextLabel,
-          channel,
-        },
-      }),
-    );
+    await auditLeadStageChanged(actor, {
+      organizationId: orgId,
+      leadId,
+      leadName,
+      prevStage,
+      nextStage,
+      isProspect: tableName === "prospects",
+      channel,
+    });
     return NextResponse.json({ ok: true });
   }
 
   if (data.event === "lead.created") {
     const { leadId, leadName, tableName, channel } = data;
-    const resolvedTable = tableName ?? "leads";
-    const entity = resolvedTable === "prospects" ? "Prospect" : "Lead";
-    const nameSuffix = leadName ? ` (${leadName})` : "";
-
-    await recordAudit(
-      withAuditActor(g.ctx.session, {
-        organizationId: orgId,
-        actorUid,
-        event: "lead.created",
-        operation: "create",
-        tableName: resolvedTable,
-        message: `${entity} created${nameSuffix}`,
-        updatedValue: leadName ?? leadId,
-        meta: { leadId, leadName, channel, tableName: resolvedTable },
-      }),
-    );
+    await auditLeadCreated(actor, {
+      organizationId: orgId,
+      leadId,
+      leadName,
+      channel,
+      isProspect: tableName === "prospects",
+    });
     return NextResponse.json({ ok: true });
   }
 
   if (data.event === "deal.created") {
     const { dealId, dealName, leadId, channel } = data;
-    await recordAudit(
-      withAuditActor(g.ctx.session, {
-        organizationId: orgId,
-        actorUid,
-        event: "deal.created",
-        operation: "create",
-        tableName: "deals",
-        message: `Deal created (${dealName ?? dealId})`,
-        updatedValue: dealName ?? dealId,
-        meta: { dealId, dealName, leadId, channel },
-      }),
-    );
+    await auditDealCreated(actor, { organizationId: orgId, dealId, dealName, leadId, channel });
     return NextResponse.json({ ok: true });
   }
 
@@ -192,37 +157,14 @@ export async function POST(req: Request) {
     if (prevStage === nextStage) {
       return NextResponse.json({ ok: true, skipped: true });
     }
-    const prevLabel = stageLabel(prevStage);
-    const nextLabel = stageLabel(nextStage);
-    const event = data.event as AuditEvent;
-
-    await recordAudit(
-      withAuditActor(g.ctx.session, {
-        organizationId: orgId,
-        actorUid,
-        event,
-        operation: "update",
-        tableName: "deals",
-        fieldName: "stage",
-        message:
-          event === "deal.won"
-            ? "Deal marked won"
-            : event === "deal.lost"
-              ? "Deal marked lost"
-              : `Deal stage changed from ${prevLabel} to ${nextLabel}`,
-        prevValue: prevLabel,
-        updatedValue: nextLabel,
-        meta: {
-          dealId,
-          dealName,
-          prevStage,
-          nextStage,
-          prevValue: prevLabel,
-          updatedValue: nextLabel,
-          channel,
-        },
-      }),
-    );
+    await auditDealStageChanged(actor, {
+      organizationId: orgId,
+      dealId,
+      dealName,
+      prevStage,
+      nextStage,
+      channel,
+    });
     return NextResponse.json({ ok: true });
   }
 

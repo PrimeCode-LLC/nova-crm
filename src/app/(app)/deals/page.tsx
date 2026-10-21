@@ -31,7 +31,6 @@ import { useLocalDeals } from "@/hooks/use-local-deals";
 import { useQueryClient } from "@tanstack/react-query";
 import { getClientDb } from "@/lib/db/document-access/client";
 import { persistDealCreateClient } from "@/lib/documents/persist-deal-create-client";
-import { recordDealCreatedClient } from "@/lib/documents/audit-change-client";
 import { cn } from "@/lib/utils";
 
 const NewDealDialog = dynamic(
@@ -74,13 +73,6 @@ export default function DealsPage() {
         void queryClient.invalidateQueries({ queryKey: ["org", "crm-pages", "deals"] });
         void queryClient.invalidateQueries({ queryKey: ["org", "crm-counts"] });
       }
-      const lead = ws.getLeadById(deal.leadId);
-      recordDealCreatedClient({
-        dealId: deal.id,
-        dealName: deal.name,
-        leadId: deal.leadId,
-        channel: lead?.channel,
-      });
       if (deal.leadId) {
         ws.addTimelineEvent({
           id:

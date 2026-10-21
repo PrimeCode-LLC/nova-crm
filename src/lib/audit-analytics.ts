@@ -158,12 +158,14 @@ export function aggregateAuditAnalytics(
     }
 
     if (row.event === "lead.created") {
-      kpis.leadsCreated += 1;
-      person.leadsCreated += 1;
+      // Batch rows (imports) carry meta.count (QA 2.5).
+      const created = Math.max(1, Math.floor(Number(row.meta.count) || 1));
+      kpis.leadsCreated += created;
+      person.leadsCreated += created;
       const ch = channelFromMeta(row.meta);
       if (ch && (!channelFilter || ch === channelFilter)) {
         const bucket = funnelByChannel.get(ch) ?? {};
-        bucket.applied = (bucket.applied ?? 0) + 1;
+        bucket.applied = (bucket.applied ?? 0) + created;
         funnelByChannel.set(ch, bucket);
       }
     }

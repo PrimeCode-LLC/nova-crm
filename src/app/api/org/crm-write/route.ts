@@ -14,6 +14,7 @@ import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { crmModuleAllowedServer } from "@/lib/platform/guard-admin-feature";
+import { crmAuditBefore, recordCrmWriteAudit, type CrmAuditBefore } from "@/lib/db/crm-write-audit";
 import { cancelLeadOutreachServer } from "@/lib/email/cancel-lead-outreach-server";
 import { cancelPendingScheduledEmailsForLeadServer } from "@/lib/email/scheduled-emails-server";
 import type { ModuleCapability } from "@/lib/permissions/catalog";
@@ -201,6 +202,20 @@ export async function POST(req: Request) {
       }
     }
 
+    // Snapshot for server-side audit (created / stage moves) — QA 2.5.
+    const auditTarget =
+      body.action === "upsert_graph"
+        ? { entity: "lead" as CrmEntity, id: body.lead.id, written: body.lead.doc, mayCreate: true }
+        : body.action === "upsert"
+          ? { entity: body.entity as CrmEntity, id: body.id, written: body.doc, mayCreate: true }
+          : body.action === "patch"
+            ? { entity: body.entity as CrmEntity, id: body.id, written: body.patch, mayCreate: false }
+            : null;
+    const auditBefore: CrmAuditBefore =
+      auditTarget && (auditTarget.entity === "lead" || auditTarget.entity === "deal")
+        ? await crmAuditBefore(organizationId, auditTarget.entity, auditTarget.id)
+        : null;
+
     let result;
     switch (body.action) {
       case "upsert":
@@ -247,6 +262,12 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { ok: false, error: result.error },
         { status: result.status },
+      );
+    }
+    if (auditTarget && (auditTarget.entity === "lead" || auditTarget.entity === "deal")) {
+      await recordCrmWriteAudit(
+        { uid: viewerUid, email: guard.ctx.session.email },
+        { organizationId, ...auditTarget, before: auditBefore },
       );
     }
     if (body.action === "delete" && body.entity === "lead") {

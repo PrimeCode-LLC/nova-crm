@@ -12,6 +12,7 @@ import { getAdminDb } from "@/lib/db/document-access/admin";
 import { upsertLeadGraphPostgres } from "@/lib/db/crm-write-postgres";
 import { findLeadIdByContactEmailPostgres } from "@/lib/db/list-crm-postgres";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
+import { auditLeadCreated } from "@/lib/documents/crm-change-audit-server";
 import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 import { buildProspectEntities, emptyProspectForm } from "@/lib/prospects/prospect-form";
 
@@ -126,6 +127,16 @@ export async function ingestWebsiteLeadServer(
     lead: { id: lead.id, doc: { ...lead } },
   });
   if (!result.ok) return { ok: false, error: result.error };
+  await auditLeadCreated(
+    { uid: ownerId },
+    {
+      organizationId,
+      leadId: lead.id,
+      leadName: [lead.contactName, lead.companyName].filter(Boolean).join(" · "),
+      isProspect: true,
+      source,
+    },
+  ).catch((err) => console.error("[website-lead] audit failed", lead.id, err));
 
   const db = getAdminDb();
   if (db) {

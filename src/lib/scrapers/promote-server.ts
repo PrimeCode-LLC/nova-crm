@@ -1,4 +1,5 @@
 import { getAdminDb } from "@/lib/db/document-access/admin";
+import { auditLeadCreated } from "@/lib/documents/crm-change-audit-server";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { stampForCreate } from "@/lib/documents/tenant-write";
@@ -293,6 +294,17 @@ export async function promoteRawItemToProspectServer(input: {
       organizationId: input.organizationId,
     });
   }
+
+  await auditLeadCreated(
+    { uid: input.userId },
+    {
+      organizationId: input.organizationId,
+      leadId,
+      leadName: companyName,
+      isProspect: true,
+      source: "intake",
+    },
+  ).catch((err) => console.error("[promote] audit failed", leadId, err));
 
   const teId = newEntityId("te");
   await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(

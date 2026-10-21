@@ -53,7 +53,6 @@ import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { getClientDb } from "@/lib/db/document-access/client";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
 import { resolveOrganizationIdForFirestoreWrite } from "@/lib/db/document-access/resolve-organization-id-for-write";
-import { COLLECTIONS } from "@/lib/documents/collections";
 import { groupTimelineEventsByLead } from "@/lib/documents/group-timeline-events";
 import {
   persistAccountCreateClient,
@@ -105,7 +104,6 @@ import {
   persistPermissionOverrideDelete,
 } from "@/lib/documents/persist-workspace-entities-client";
 import { persistOrgActivityEventCreate } from "@/lib/documents/persist-org-activity-client";
-import { doc, serverTimestamp, updateDoc } from "@/lib/db/document-shim/shim-client-firestore";
 import { toast } from "sonner";
 import { toastError } from "@/lib/error-logging/toast-error";
 import { isAuthDisabled } from "@/lib/auth/flags";
@@ -124,11 +122,6 @@ import {
   type WorkspaceSessionV2,
 } from "@/lib/workspace-session";
 import { STAGES_BY_KEY } from "@/lib/constants";
-import {
-  recordDealStageChangeClient,
-  recordLeadCreatedClient,
-  recordLeadStageChangeClient,
-} from "@/lib/documents/audit-change-client";
 import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
 import { fetchLeadByIdClient } from "@/lib/leads/fetch-lead-by-id-client";
@@ -1056,13 +1049,8 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         try {
           const db = liveDbOrNull();
+          // crm-write records the lead.created audit server-side (QA 2.5).
           await persistLeadCreateClient(db, orgId, scored);
-          recordLeadCreatedClient({
-            leadId: scored.id,
-            leadName: leadDisplayLabel(scored),
-            channel: scored.channel,
-            isProspect: isProspectRow(scored),
-          });
         } catch (e) {
             toastError("Could not save lead", e, {
               location: "src/components/providers/workspace-mode-provider.tsx",
@@ -2389,28 +2377,14 @@ export function WorkspaceModeProvider({
   const patchDeal = React.useCallback(
     (dealId: string, patch: Partial<Deal>) => {
       const iso = new Date().toISOString();
-      const snap = snapshotRef.current;
-      const existing = snap.deals.find((d) => d.id === dealId);
-      const merged = existing ? { ...existing, ...patch } : null;
-      const linkedLead = merged?.leadId
-        ? snap.leads.find((l) => l.id === merged.leadId)
-        : undefined;
       const writeFs =
         canPersistCrmLive();
       if (writeFs) {
         void (async () => {
           try {
             const db = liveDbOrNull();
+            // crm-write records deal stage / won / lost audits server-side (QA 2.5).
             await persistDealPatchClient(db, dealId, { ...patch, updatedAt: iso });
-            if (existing && patch.stage && patch.stage !== existing.stage) {
-              recordDealStageChangeClient({
-                dealId,
-                dealName: merged?.name,
-                prevStage: existing.stage,
-                nextStage: patch.stage,
-                channel: linkedLead?.channel,
-              });
-            }
           } catch (e) {
             toastError("Could not save deal", e, {
               location: "src/components/providers/workspace-mode-provider.tsx",
@@ -2789,7 +2763,8 @@ export function WorkspaceModeProvider({
               stage: nextStage,
               ...(archivePatch ?? {}),
             };
-            await updateDoc(doc(db, COLLECTIONS.leads, leadId), stagePayload);
+            // Through crm-write so the server records the stage change (QA 2.5).
+            await persistLeadPatchClient(db, leadId, stagePayload as Partial<Lead>);
             await persistTimelineEventCreate(
               db,
               orgId,
@@ -2797,19 +2772,11 @@ export function WorkspaceModeProvider({
               await resolveLeadOwnerIdForFirestore(leadId),
             );
             if (syncSalesLeadStage && linkedSalesLeadId) {
-              await updateDoc(doc(db, COLLECTIONS.leads, linkedSalesLeadId), {
+              await persistLeadPatchClient(db, linkedSalesLeadId, {
                 stage: nextStage,
                 ...(archivePatch ?? {}),
-              });
+              } as Partial<Lead>);
             }
-            recordLeadStageChangeClient({
-              leadId,
-              leadName: lead ? leadDisplayLabel(lead) : undefined,
-              prevStage: previousStage,
-              nextStage,
-              isProspect: lead ? isProspectRow(lead) : false,
-              channel: lead?.channel,
-            });
           } catch (e) {
             toastError("Could not save stage", e, {
               location: "src/components/providers/workspace-mode-provider.tsx",

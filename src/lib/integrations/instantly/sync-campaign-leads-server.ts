@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { auditLeadCreated } from "@/lib/documents/crm-change-audit-server";
 import type { DocumentReference } from "@/lib/db/document-shim/shim-firestore";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
@@ -239,6 +240,13 @@ export async function syncInstantlyCampaignLeadsToNova(
         await mirrorCrmEntityAfterWrite("lead", c.leadId, { organizationId });
       }
     }
+  }
+
+  if (created > 0 && uid) {
+    await auditLeadCreated(
+      { uid },
+      { organizationId, source: "Instantly sync", count: created },
+    ).catch((err) => console.error("[instantly sync] audit failed", err));
   }
 
   return {

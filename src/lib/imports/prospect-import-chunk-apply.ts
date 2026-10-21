@@ -7,6 +7,7 @@
  * `QUEUE_IMPORT_CHUNKS_V1=true` (see queue flags).
  */
 
+import { auditLeadCreated } from "@/lib/documents/crm-change-audit-server";
 import { createHash } from "node:crypto";
 import {
   FieldValue,
@@ -922,6 +923,18 @@ export async function processProspectImportChunkById(
       }
     }
     await finalizeChunk(chunkRef, jobRef, after, results);
+    if (results.created > 0) {
+      // One audit row per chunk; activity counters read meta.count (QA 2.5).
+      await auditLeadCreated(
+        { uid: job.uploaderId, email: job.uploaderEmail ?? null },
+        {
+          organizationId: after.organizationId,
+          isProspect: true,
+          source: `import ${job.filename}`,
+          count: results.created,
+        },
+      ).catch((err) => console.error("[import] audit failed", after.jobId, err));
+    }
   } catch (error) {
     console.error("Prospect import chunk failed", {
       jobId: after.jobId,

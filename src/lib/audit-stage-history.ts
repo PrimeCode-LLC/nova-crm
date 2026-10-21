@@ -7,7 +7,7 @@ export type StageHistoryEntry = {
   at: string;
   actorUid: string | null;
   actorName: string | null;
-  kind: "created" | "stage_changed";
+  kind: "created" | "stage_changed" | "pushed" | "moved_back";
   prevStage: string | null;
   nextStage: string | null;
   summary: string;
@@ -92,21 +92,62 @@ export function timelineRowToStageEntry(input: {
   summary: string;
   createdAt: string;
   actorName?: string | null;
+  payload?: Record<string, unknown> | null;
 }): StageHistoryEntry | null {
-  if (input.type !== "stage_changed") return null;
-  const { prevStage, nextStage } = parseTimelineStageSummary(input.summary);
   const actorUid = input.actorId?.trim() || null;
-  return {
+  const base = {
     id: `timeline:${input.id}`,
-    source: "timeline",
+    source: "timeline" as const,
     at: input.createdAt,
     actorUid,
     actorName: input.actorName?.trim() || actorUid || "Unknown",
+  };
+  // Prospect ↔ sales-lead moves are milestones too (QA 2.5 / PROS-09).
+  if (input.type === "prospect_channel_pushed") {
+    return { ...base, kind: "pushed", prevStage: null, nextStage: null, summary: input.summary || "Pushed to sales" };
+  }
+  if (input.type === "lead_moved_back_to_prospect") {
+    const prev = input.payload?.previousStage;
+    return {
+      ...base,
+      kind: "moved_back",
+      prevStage: typeof prev === "string" ? prev : null,
+      nextStage: "prospect",
+      summary: input.summary || "Moved back to prospect",
+    };
+  }
+  if (input.type !== "stage_changed") return null;
+  const { prevStage, nextStage } = parseTimelineStageSummary(input.summary);
+  return {
+    ...base,
     kind: "stage_changed",
     prevStage,
     nextStage,
     summary: prevStage && nextStage ? `${prevStage} → ${nextStage}` : input.summary,
   };
+}
+
+function normalizeStage(stage: string | null): string {
+  return (stage ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+/** Window in which an audit row and a timeline row describe the same change. */
+const SAME_CHANGE_WINDOW_MS = 2 * 60_000;
+
+/**
+ * One stage move is logged twice (audit + timeline) with slightly different
+ * timestamps and labels ("negotiation" vs "Negotiation"); show it once,
+ * preferring the audit row (QA 2.5 / LEAD-04).
+ */
+function isSameStageChange(a: StageHistoryEntry, b: StageHistoryEntry): boolean {
+  if (a.kind !== "stage_changed" || b.kind !== "stage_changed") return false;
+  if (a.source === b.source) return false;
+  if ((a.actorUid ?? "") !== (b.actorUid ?? "")) return false;
+  if (normalizeStage(a.prevStage) !== normalizeStage(b.prevStage)) return false;
+  if (normalizeStage(a.nextStage) !== normalizeStage(b.nextStage)) return false;
+  const ta = a.at ? new Date(a.at).getTime() : 0;
+  const tb = b.at ? new Date(b.at).getTime() : 0;
+  return Math.abs(ta - tb) <= SAME_CHANGE_WINDOW_MS;
 }
 
 export function mergeStageHistoryEntries(entries: StageHistoryEntry[]): StageHistoryEntry[] {
@@ -116,7 +157,15 @@ export function mergeStageHistoryEntries(entries: StageHistoryEntry[]): StageHis
     const key = `${entry.kind}:${entry.summary}:${entry.actorUid ?? ""}:${timeKey}`;
     if (!byKey.has(key)) byKey.set(key, entry);
   }
-  return [...byKey.values()].sort((a, b) => {
+  // Audit rows first so they win over their timeline twin.
+  const ordered = [...byKey.values()].sort((a, b) =>
+    a.source === b.source ? 0 : a.source === "audit" ? -1 : 1,
+  );
+  const kept: StageHistoryEntry[] = [];
+  for (const entry of ordered) {
+    if (!kept.some((k) => isSameStageChange(k, entry))) kept.push(entry);
+  }
+  return kept.sort((a, b) => {
     const ta = a.at ? new Date(a.at).getTime() : 0;
     const tb = b.at ? new Date(b.at).getTime() : 0;
     return ta - tb;

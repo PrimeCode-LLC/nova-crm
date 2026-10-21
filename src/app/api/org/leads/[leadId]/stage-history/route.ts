@@ -68,6 +68,10 @@ export async function GET(
         summary: String(data.summary ?? ""),
         createdAt: documentTimestampToIso(data.createdAt) ?? new Date().toISOString(),
         actorName,
+        payload:
+          data.payload && typeof data.payload === "object"
+            ? (data.payload as Record<string, unknown>)
+            : null,
       });
       if (entry) entries.push(entry);
     }
