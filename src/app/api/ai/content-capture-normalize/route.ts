@@ -4,7 +4,7 @@ import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
-import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
+import { aiFeatureDenialMessage, canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { indexAiDocumentServer } from "@/lib/ai/rag-indexer";
@@ -64,7 +64,13 @@ export async function POST(req: Request) {
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "content_capture_normalize", roleId)) {
     return NextResponse.json(
-      { error: "Content capture AI is not enabled for your role." },
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "content_capture_normalize",
+          "Content capture AI is not enabled for your role.",
+        ),
+      },
       { status: 403 },
     );
   }

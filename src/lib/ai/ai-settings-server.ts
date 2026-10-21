@@ -224,6 +224,25 @@ export function canUseAiFeature(
   return allowed.includes(roleId);
 }
 
+/**
+ * Why `canUseAiFeature` said no, in words the user can act on. Previously every
+ * case said "not enabled for your role", even when AI was simply not set up for
+ * the workspace (QA 2.7 / AI-03).
+ */
+export function aiFeatureDenialMessage(
+  settings: OrganizationAiSettings,
+  feature: AiFeatureKey,
+  roleMessage: string,
+): string {
+  if (!settings.enabled) {
+    return "AI is not set up for this workspace. An admin can turn it on and add a provider key in Admin → AI & knowledge.";
+  }
+  if (!settings.features[feature]?.enabled) {
+    return "This AI feature is turned off for this workspace. An admin can enable it in Admin → AI & knowledge.";
+  }
+  return roleMessage;
+}
+
 export function resolveFeatureModel(
   settings: OrganizationAiSettings,
   feature: AiFeatureKey,

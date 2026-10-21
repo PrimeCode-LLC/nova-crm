@@ -9,7 +9,7 @@ import {
   pickDashboardWatchListFromCandidates,
 } from "@/lib/ai/context/dashboard-context";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
-import { getOrganizationAiSettingsServer, canUseAiFeature } from "@/lib/ai/ai-settings-server";
+import { getOrganizationAiSettingsServer, aiFeatureDenialMessage, canUseAiFeature } from "@/lib/ai/ai-settings-server";
 import { fetchTenantWorkspaceBundleServer } from "@/lib/ai/server-workspace-fetch";
 import {
   OWNER_SCOPE_PREFIX,
@@ -96,7 +96,16 @@ export async function POST(req: Request) {
 
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "dashboard_brief", roleId)) {
-    return NextResponse.json({ error: "AI dashboard brief is not enabled for your role." }, { status: 403 });
+    return NextResponse.json(
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "dashboard_brief",
+          "AI dashboard brief is not enabled for your role.",
+        ),
+      },
+      { status: 403 },
+    );
   }
 
   const channelScope = parsed.data.channelScope as ChannelKey[];

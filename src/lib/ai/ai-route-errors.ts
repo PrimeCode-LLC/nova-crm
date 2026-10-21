@@ -46,12 +46,13 @@ export function aiErrorResponse(e: unknown, ctx?: AiErrorLogContext): NextRespon
     queueServerErrorLog(e, e.message, 503, ctx);
     return NextResponse.json({ error: e.message, code: "not_configured" }, { status: 503 });
   }
-  if (e instanceof Error && e.message.includes("API key")) {
+  // Provider failures first: "Incorrect API key provided" is a rejected key,
+  // not a missing one, and must not be reported as not_configured (QA 2.7).
+  const provider = parseAiProviderError(e);
+  if (!provider && e instanceof Error && e.message.includes("API key")) {
     queueServerErrorLog(e, e.message, 503, ctx);
     return NextResponse.json({ error: e.message, code: "not_configured" }, { status: 503 });
   }
-
-  const provider = parseAiProviderError(e);
   if (provider) {
     if (provider.code !== "provider_rate_limit") {
       console.error("[ai]", provider.code, e);

@@ -98,12 +98,18 @@ export async function POST(req: Request) {
   const prevCount = (libSnap.data()?.documentCount as number | undefined) ?? 0;
   await libRef.set({ documentCount: prevCount + 1, updatedAt: now }, { merge: true });
 
+  // The document is saved either way; report indexing problems instead of a
+  // blank 500 so the UI can say "saved, not indexed" (QA 2.7 / AI-02, AI-05).
+  let indexError: string | undefined;
   if (parsed.data.indexNow !== false) {
-    await indexAiDocumentServer({
+    const indexed = await indexAiDocumentServer({
       organizationId: orgId,
       documentId: ref.id,
       userId: g.ctx.session.uid,
-    });
+    }).catch((err: unknown) => ({
+      error: err instanceof Error ? err.message : "Indexing failed",
+    }));
+    if ("error" in indexed) indexError = indexed.error;
   }
 
   await recordAudit({
@@ -113,5 +119,9 @@ export async function POST(req: Request) {
     meta: { documentId: ref.id, libraryId: parsed.data.libraryId },
   });
 
-  return NextResponse.json({ documentId: ref.id });
+  return NextResponse.json({
+    documentId: ref.id,
+    indexed: parsed.data.indexNow !== false && !indexError,
+    ...(indexError ? { indexError } : {}),
+  });
 }

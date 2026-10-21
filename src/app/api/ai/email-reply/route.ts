@@ -4,6 +4,7 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature, runAiTextFeature } from "@/lib/ai/run-feature";
 import {
+  aiFeatureDenialMessage,
   canUseAiFeature,
   getAiPromptServer,
   getOrganizationAiSettingsServer,
@@ -66,7 +67,16 @@ export async function POST(req: Request) {
 
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "email_reply", roleId)) {
-    return NextResponse.json({ error: "AI email reply is not enabled for your role." }, { status: 403 });
+    return NextResponse.json(
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "email_reply",
+          "AI email reply is not enabled for your role.",
+        ),
+      },
+      { status: 403 },
+    );
   }
 
   const composeSource =

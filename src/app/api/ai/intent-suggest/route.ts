@@ -5,7 +5,7 @@ import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { buildLeadAiContext } from "@/lib/ai/context/lead-context";
 import { loadLeadAiContextServer } from "@/lib/ai/load-lead-ai-context-server";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
-import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
+import { aiFeatureDenialMessage, canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { getOrganizationIntentPlaybookServer } from "@/lib/intent/intent-playbook-server";
 import { computeQualityScore } from "@/lib/intent/compute-quality-score";
 import { getAdminDb } from "@/lib/db/document-access/admin";
@@ -70,7 +70,13 @@ export async function POST(req: Request) {
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "intent_suggest", roleId)) {
     return NextResponse.json(
-      { error: "Intent suggest is not enabled for your role." },
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "intent_suggest",
+          "Intent suggest is not enabled for your role.",
+        ),
+      },
       { status: 403 },
     );
   }

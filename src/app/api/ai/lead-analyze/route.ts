@@ -5,7 +5,7 @@ import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { buildLeadAiContext } from "@/lib/ai/context/lead-context";
 import { loadLeadAiContextServer } from "@/lib/ai/load-lead-ai-context-server";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
-import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
+import { aiFeatureDenialMessage, canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
 import { retrieveRagChunksServer } from "@/lib/ai/rag-retrieve";
 import { getAdminDb } from "@/lib/db/document-access/admin";
@@ -101,7 +101,16 @@ export async function POST(req: Request) {
 
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "lead_analyze", roleId)) {
-    return NextResponse.json({ error: "Lead analysis is not enabled for your role." }, { status: 403 });
+    return NextResponse.json(
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "lead_analyze",
+          "Lead analysis is not enabled for your role.",
+        ),
+      },
+      { status: 403 },
+    );
   }
 
   const loaded = await loadLeadAiContextServer({

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
-import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
+import { aiFeatureDenialMessage, canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import {
@@ -100,7 +100,13 @@ export async function POST(req: Request) {
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "content_graphics_brief", roleId)) {
     return NextResponse.json(
-      { error: "Graphics brief AI is not enabled for your role." },
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "content_graphics_brief",
+          "Graphics brief AI is not enabled for your role.",
+        ),
+      },
       { status: 403 },
     );
   }

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiTextFeature } from "@/lib/ai/run-feature";
-import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
+import { aiFeatureDenialMessage, canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveFitCheckContextServer } from "@/lib/ai/fit-check-rag";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
@@ -79,7 +79,16 @@ export async function POST(req: Request, ctx: RouteCtx) {
 
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "opportunity_fit_discuss", roleId)) {
-    return NextResponse.json({ error: "Discuss is not enabled for your role." }, { status: 403 });
+    return NextResponse.json(
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "opportunity_fit_discuss",
+          "Discuss is not enabled for your role.",
+        ),
+      },
+      { status: 403 },
+    );
   }
 
   const scan = await getOpportunityScanServer({

@@ -508,9 +508,15 @@ export function KnowledgeAdminPanel({
         indexNow: true,
       }),
     });
-    if (!res.ok) toast.error("Could not add document");
-    else {
-      toast.success("Document indexed");
+    const body = (await res.json().catch(() => ({}))) as { error?: unknown; indexError?: string };
+    if (!res.ok) {
+      toast.error(typeof body.error === "string" ? body.error : "Could not add document");
+    } else {
+      if (body.indexError) {
+        toast.warning("Document saved but not indexed", { description: body.indexError });
+      } else {
+        toast.success("Document indexed");
+      }
       setDocTitle("");
       setDocContent("");
       onLibrariesChange?.();

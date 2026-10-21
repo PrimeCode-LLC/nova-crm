@@ -149,7 +149,11 @@ export function FitKnowledgeDocumentsSheet({
           toast.error(data.error ?? "Could not create document");
           return;
         }
-        toast.success("Document created and indexed");
+        if (data.indexError) {
+          toast.warning("Document saved but not indexed", { description: data.indexError });
+        } else {
+          toast.success("Document created and indexed");
+        }
       } else if (selectedId) {
         const res = await fetch(`/api/ai/rag/documents/${selectedId}`, {
           method: "PATCH",

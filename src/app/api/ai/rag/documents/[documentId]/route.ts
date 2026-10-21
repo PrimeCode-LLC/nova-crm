@@ -87,7 +87,8 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
       userId: g.ctx.session.uid,
     });
     if ("error" in indexed) {
-      return NextResponse.json({ error: indexed.error }, { status: 500 });
+      // Saved but not indexed (e.g. provider rejected the key) — QA 2.7.
+      return NextResponse.json({ error: indexed.error, code: "index_failed" }, { status: 422 });
     }
   }
 

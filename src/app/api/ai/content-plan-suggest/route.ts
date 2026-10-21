@@ -3,7 +3,7 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
-import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
+import { aiFeatureDenialMessage, canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { stripUndefined } from "@/lib/documents/strip-undefined";
@@ -123,7 +123,13 @@ export async function POST(req: Request) {
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "content_plan_suggest", roleId)) {
     return NextResponse.json(
-      { error: "Content plan AI is not enabled for your role." },
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "content_plan_suggest",
+          "Content plan AI is not enabled for your role.",
+        ),
+      },
       { status: 403 },
     );
   }

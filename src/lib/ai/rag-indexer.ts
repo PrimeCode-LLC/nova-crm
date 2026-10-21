@@ -6,6 +6,7 @@ import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { getAiProviderKeyServer } from "@/lib/ai/ai-secrets-server";
 import { getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { recordAiUsage } from "@/lib/ai/usage-logger";
+import { parseAiProviderError } from "@/lib/ai/parse-provider-error";
 
 const CHUNK_SIZE = 1200;
 
@@ -54,10 +55,37 @@ export async function indexAiDocumentServer(input: {
 
   if (provider === "openai") {
     const openai = createOpenAI({ apiKey });
-    const result = await embedMany({
-      model: openai.embedding(model),
-      values: chunks,
-    });
+    let result: Awaited<ReturnType<typeof embedMany>>;
+    try {
+      result = await embedMany({
+        model: openai.embedding(model),
+        values: chunks,
+      });
+    } catch (err) {
+      // A bad key / quota used to escape as an unhandled 500 with an empty body,
+      // leaving the document silently unindexed (QA 2.7 / AI-02).
+      const message =
+        parseAiProviderError(err)?.message ??
+        (err instanceof Error ? err.message : "Embedding request failed");
+      await recordAiUsage({
+        organizationId: input.organizationId,
+        userId: input.userId,
+        feature: "rag_index",
+        provider,
+        model,
+        inputTokens: 0,
+        outputTokens: 0,
+        latencyMs: Date.now() - started,
+        status: "error",
+      }).catch(() => undefined);
+      await docRef
+        .set(
+          { indexStatus: "index_failed", indexError: message, updatedAt: new Date().toISOString() },
+          { merge: true },
+        )
+        .catch(() => undefined);
+      return { error: message };
+    }
     embeddings = result.embeddings;
     await recordAiUsage({
       organizationId: input.organizationId,
@@ -102,6 +130,8 @@ export async function indexAiDocumentServer(input: {
     docRef,
     {
       chunkCount: chunks.length,
+      indexStatus: "indexed",
+      indexError: FieldValue.delete(),
       updatedAt: new Date().toISOString(),
     },
     { merge: true },

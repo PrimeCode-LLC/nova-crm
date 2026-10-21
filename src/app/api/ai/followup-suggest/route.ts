@@ -19,7 +19,7 @@ import {
   type FollowupReplyThread,
 } from "@/lib/ai/followup-reply-thread";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
-import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
+import { aiFeatureDenialMessage, canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveOutreachKnowledgeServer } from "@/lib/ai/outreach-knowledge-server";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
@@ -182,7 +182,13 @@ export async function POST(req: Request) {
   const settings = await getOrganizationAiSettingsServer(orgId);
   if (!canUseAiFeature(settings, "followup_suggest", roleId)) {
     return NextResponse.json(
-      { error: "AI follow-up suggestions are not enabled for your role." },
+      {
+        error: aiFeatureDenialMessage(
+          settings,
+          "followup_suggest",
+          "AI follow-up suggestions are not enabled for your role.",
+        ),
+      },
       { status: 403 },
     );
   }

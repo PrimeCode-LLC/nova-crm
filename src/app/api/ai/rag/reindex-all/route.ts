@@ -41,7 +41,9 @@ export async function POST() {
       organizationId: orgId,
       documentId: doc.id,
       userId: g.ctx.session.uid,
-    });
+    }).catch((err: unknown) => ({
+      error: err instanceof Error ? err.message : "Indexing failed",
+    }));
     if ("error" in result) {
       failed += 1;
       if (errors.length < 10) errors.push(`${doc.id}: ${result.error}`);

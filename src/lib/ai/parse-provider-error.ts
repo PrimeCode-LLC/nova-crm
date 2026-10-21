@@ -72,7 +72,8 @@ export function parseAiProviderError(e: unknown): ParsedAiProviderError | null {
   if (err.statusCode === 401 || err.statusCode === 403) {
     return {
       code: "provider_auth",
-      httpStatus: 503,
+      // Workspace configuration problem, not an outage (QA 2.7).
+      httpStatus: 400,
       message:
         "The AI provider rejected the API key. Verify the key in Admin → AI & knowledge.",
     };
