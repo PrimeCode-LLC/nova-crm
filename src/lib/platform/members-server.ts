@@ -156,6 +156,41 @@ export async function getMemberFromDocumentStoreServer(
   return docToMember(orgId, d.id, d.data()!);
 }
 
+/**
+ * Refuse a change that would touch an owner without owner rights, or leave the
+ * workspace with no active owner (QA 1.7). `leavesOwner` is true when the change
+ * keeps the target an active owner (e.g. role stays owner, status stays active).
+ */
+export async function assertOwnerChangeAllowedServer(input: {
+  orgId: string;
+  targetUid: string;
+  actorRole: OrgMemberRole;
+  leavesOwner: boolean;
+}): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const col = membersCol(input.orgId);
+  if (!col) return { ok: true };
+  const target = await col.doc(input.targetUid).get();
+  if (!target.exists) return { ok: true };
+  const t = docToMember(input.orgId, target.id, target.data()!);
+  if (t.role !== "owner") return { ok: true };
+  if (input.actorRole !== "owner") {
+    return { ok: false, status: 403, error: "Only an owner can change or remove another owner." };
+  }
+  if (input.leavesOwner || t.status !== "active") return { ok: true };
+  const owners = await col.where("role", "==", "owner").get();
+  const otherActiveOwners = owners.docs.filter(
+    (d) => d.id !== input.targetUid && (d.data().status ?? "active") === "active",
+  ).length;
+  if (otherActiveOwners === 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: "A workspace must keep at least one active owner. Make someone else an owner first.",
+    };
+  }
+  return { ok: true };
+}
+
 /** Postgres-only membership lookup (no document-store fallback). */
 export async function getMemberFromPostgresServer(
   orgId: string,

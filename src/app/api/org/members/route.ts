@@ -3,6 +3,7 @@ import { z } from "zod";
 import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
+  assertOwnerChangeAllowedServer,
   deleteMemberServer,
   getMemberFromDocumentStoreServer,
   listMembersServer,
@@ -57,6 +58,16 @@ export async function PATCH(req: Request) {
       { error: "Only the owner can grant admin or owner roles." },
       { status: 403 },
     );
+  }
+
+  if (role || status) {
+    const guard = await assertOwnerChangeAllowedServer({
+      orgId,
+      targetUid: uid,
+      actorRole: g.ctx.role,
+      leavesOwner: (role ?? "owner") === "owner" && (status ?? "active") === "active",
+    });
+    if (!guard.ok) return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
 
   if (role) {
@@ -237,6 +248,15 @@ export async function DELETE(req: Request) {
     );
   }
   const orgId = g.ctx.session.organizationId;
+  const ownerGuard = await assertOwnerChangeAllowedServer({
+    orgId,
+    targetUid: uid,
+    actorRole: g.ctx.role,
+    leavesOwner: false,
+  });
+  if (!ownerGuard.ok) {
+    return NextResponse.json({ error: ownerGuard.error }, { status: ownerGuard.status });
+  }
   const r = await deleteMemberServer(orgId, uid);
   if ("error" in r) return NextResponse.json({ error: r.error }, { status: 400 });
   const db = getAdminDb();
