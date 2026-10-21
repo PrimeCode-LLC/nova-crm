@@ -14,6 +14,8 @@ import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { crmModuleAllowedServer } from "@/lib/platform/guard-admin-feature";
+import { cancelLeadOutreachServer } from "@/lib/email/cancel-lead-outreach-server";
+import { cancelPendingScheduledEmailsForLeadServer } from "@/lib/email/scheduled-emails-server";
 import type { ModuleCapability } from "@/lib/permissions/catalog";
 
 const entitySchema = z.enum(["account", "contact", "lead", "deal"]);
@@ -246,6 +248,16 @@ export async function POST(req: Request) {
         { ok: false, error: result.error },
         { status: result.status },
       );
+    }
+    if (body.action === "delete" && body.entity === "lead") {
+      // A deleted lead must not keep receiving scheduled mail (QA 1.5 / LEAD-12).
+      try {
+        const reason = "Lead deleted";
+        await cancelLeadOutreachServer({ organizationId, leadId: body.id, userId: viewerUid, reason });
+        await cancelPendingScheduledEmailsForLeadServer({ organizationId, leadId: body.id, reason });
+      } catch (err) {
+        console.error("[org/crm-write] cancel outreach after lead delete failed", body.id, err);
+      }
     }
     return NextResponse.json({ ok: true, source: "postgres" as const });
   } catch (err) {

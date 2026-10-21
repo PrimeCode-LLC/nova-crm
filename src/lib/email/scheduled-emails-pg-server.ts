@@ -88,6 +88,7 @@ function emptySkipReasons(): Record<ScheduledSkipReason, number> {
     followup_stopped: 0,
     contact_policy: 0,
     suppressed: 0,
+    mailbox_disabled: 0,
     other: 0,
   };
 }

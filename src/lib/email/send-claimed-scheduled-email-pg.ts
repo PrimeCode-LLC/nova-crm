@@ -265,6 +265,27 @@ export async function sendClaimedScheduledEmailPg(
     return { outcome: "failed", detail: "Mailbox no longer exists." };
   }
 
+  if (mailbox.enabled === false) {
+    await updateScheduledEmailPg(organizationId, input.id, {
+      status: "cancelled",
+      leaseId: null,
+      leaseUntil: null,
+      error: "Mailbox is disabled.",
+      failureKind: "permanent",
+      lastSkipReason: "mailbox_disabled",
+    });
+    if (followupId) {
+      await updateFollowupDeliveryState(followupId, {
+        deliveryStatus: "cancelled",
+        cancelledAt: new Date().toISOString(),
+        cancelReason: "Mailbox is disabled.",
+        scheduledEmailId: FieldValue.delete(),
+        emailScheduledAt: FieldValue.delete(),
+      });
+    }
+    return { outcome: "skipped", reason: "mailbox_disabled", detail: "mailbox_disabled" };
+  }
+
   const quota = await reserveMailboxDailySendServer({
     organizationId,
     uid: mailboxOwnerUid,

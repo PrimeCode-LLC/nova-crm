@@ -16,6 +16,14 @@ import { scheduleOrgDashboardSummaryRefresh } from "@/lib/db/org-dashboard-summa
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withOrganizationScope, type TenantTx } from "@/lib/db/tenant-scope";
 
+/** Document-store collection that mirrors each CRM table (`leads/{id}`, …). */
+const CRM_COLLECTION_ROOT: Record<CrmEntity, string> = {
+  account: "accounts",
+  contact: "contacts",
+  lead: "leads",
+  deal: "deals",
+};
+
 function payloadRecord(payload: unknown): Record<string, unknown> {
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
     return { ...(payload as Record<string, unknown>) };
@@ -307,6 +315,11 @@ export async function deleteCrmEntityPostgres(
         await tx.deal.deleteMany({ where: { id, organizationId } });
         break;
     }
+    // Drop the legacy document copy too: single-doc reads fall back to it when the
+    // table row is gone, which let deleted leads keep receiving mail (QA 1.5 / LEAD-12).
+    await tx.pgDocument.deleteMany({
+      where: { path: `${CRM_COLLECTION_ROOT[entity]}/${id}`, organizationId },
+    });
 
     if (entity === "lead" && opts?.accountId) {
       const accountId = opts.accountId;

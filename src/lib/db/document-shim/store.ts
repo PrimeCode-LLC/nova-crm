@@ -404,6 +404,12 @@ export async function runDocumentTransaction<T>(
         const parsed = parsePath(path);
         await lockOnce(path);
         const existing = await readDocumentInTx(tx, path, parsed);
+        // A CRM record (lead/account/contact/deal) missing from both stores was
+        // deleted: never resurrect it from a late update such as an open pixel or
+        // send bookkeeping (QA 1.5 / LEAD-12). Firestore update() would also refuse.
+        if (!existing && crmEntityFromCollection(parsed.collectionRoot) && parsed.segments.length === 2) {
+          return;
+        }
         // Cutover-safe: clients historically called Firestore update() after local
         // creates. Upsert so missing pg_documents rows do not 500 the live UI.
         const merged = applyFieldValues(existing?.payload ?? {}, patch);

@@ -48,6 +48,7 @@ import { createUserNotificationServer } from "@/lib/notifications/create-user-no
 import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 import { stampForCreate } from "@/lib/documents/tenant-write";
 import { incrementOrgSendLedgerServer } from "@/lib/email/org-send-ledger-server";
+import { isSuppressed } from "@/lib/email/suppression-server";
 import { isQueueHeavyJobsV1Enabled, isScheduledEmailPgV1Enabled } from "@/lib/queue/flags";
 import { enqueueScheduledEmailJob } from "@/lib/queue/enqueue";
 
@@ -67,6 +68,7 @@ export type ScheduledSkipReason =
   | "followup_stopped"
   | "contact_policy"
   | "suppressed"
+  | "mailbox_disabled"
   | "other";
 
 export type ScheduledFlushRowResult = {
@@ -95,6 +97,7 @@ function emptySkipReasons(): Record<ScheduledSkipReason, number> {
     followup_stopped: 0,
     contact_policy: 0,
     suppressed: 0,
+    mailbox_disabled: 0,
     other: 0,
   };
 }
@@ -401,6 +404,61 @@ async function resolveScheduledEmailDoc(input: {
     }
   }
   return { found: false };
+}
+
+/**
+ * Cancel every pending scheduled email addressed to a lead, including ones not
+ * linked to a followup (QA 1.5 / LEAD-12: deleting a lead must stop its mail).
+ */
+export async function cancelPendingScheduledEmailsForLeadServer(input: {
+  organizationId: string;
+  leadId: string;
+  reason: string;
+}): Promise<number> {
+  const leadId = input.leadId.trim();
+  if (!leadId) return 0;
+  let cancelled = 0;
+
+  if (isScheduledEmailPgV1Enabled()) {
+    const [{ withScheduledEmailOrgScope }, { cancelScheduledEmailPgServer }] = await Promise.all([
+      import("@/lib/email/scheduled-emails-repo"),
+      import("@/lib/email/scheduled-emails-pg-server"),
+    ]);
+    const rows = await withScheduledEmailOrgScope(input.organizationId, (tx) =>
+      tx.scheduledEmailRow.findMany({
+        where: { organizationId: input.organizationId, leadId, status: "pending" },
+        select: { id: true, mailboxOwnerUid: true },
+      }),
+    );
+    for (const row of rows) {
+      const res = await cancelScheduledEmailPgServer({
+        organizationId: input.organizationId,
+        uid: row.mailboxOwnerUid,
+        id: row.id,
+        reason: input.reason,
+      });
+      if ("ok" in res && res.ok) cancelled += 1;
+    }
+    return cancelled;
+  }
+
+  const db = getAdminDb();
+  if (!db) return 0;
+  const snap = await db.collectionGroup(SCHEDULED_COLLECTION).where("leadId", "==", leadId).get();
+  for (const d of snap.docs) {
+    const data = d.data() as Record<string, unknown>;
+    if (data.status !== "pending") continue;
+    const owner = ownerFromScheduledRef(d.ref);
+    if (owner.organizationId !== input.organizationId || !owner.uid) continue;
+    const res = await cancelScheduledEmailServer({
+      organizationId: input.organizationId,
+      uid: owner.uid,
+      id: d.id,
+      reason: input.reason,
+    });
+    if ("ok" in res && res.ok) cancelled += 1;
+  }
+  return cancelled;
 }
 
 export async function cancelScheduledEmailServer(input: {
@@ -917,6 +975,37 @@ async function claimScheduledDoc(
   });
 }
 
+/** Cancel a due legacy scheduled email that must not be sent (QA 1.5). */
+async function cancelScheduledDocSkipped(
+  docRef: DocumentReference,
+  followupId: string,
+  reason: "suppressed" | "mailbox_disabled",
+  message: string,
+): Promise<SendDocResult> {
+  const now = new Date().toISOString();
+  await docRef.update({
+    status: "cancelled",
+    error: message,
+    failureKind: "permanent",
+    cancelledAt: now,
+    cancelReason: message,
+    updatedAt: now,
+    processingAt: FieldValue.delete(),
+    processingClaimId: FieldValue.delete(),
+    lastSkipReason: reason,
+  });
+  if (followupId) {
+    await updateFollowupDeliveryState(followupId, {
+      deliveryStatus: "cancelled",
+      cancelledAt: now,
+      cancelReason: message,
+      clearSchedule: true,
+      nextRetryAt: null,
+    });
+  }
+  return { outcome: "skipped", reason, detail: message };
+}
+
 async function sendScheduledDoc(
   docRef: DocumentReference,
   data: Record<string, unknown>,
@@ -1004,6 +1093,11 @@ async function sendScheduledDoc(
     }
   }
 
+  if (await isSuppressed({ organizationId, email: String(data.to ?? "") })) {
+    console.warn(`[scheduled-send] Recipient suppressed on doc "${docRef.id}", cancelling`);
+    return cancelScheduledDocSkipped(docRef, followupIdEarly, "suppressed", "Recipient is suppressed.");
+  }
+
   let mailboxOwnerUid =
     (typeof data.mailboxOwnerUid === "string" && data.mailboxOwnerUid.trim()) ||
     (typeof data.dataOwnerUid === "string" && data.dataOwnerUid.trim()) ||
@@ -1063,6 +1157,16 @@ async function sendScheduledDoc(
       });
     }
     return { outcome: "failed" };
+  }
+
+  if (mailbox.enabled === false) {
+    console.warn(`[scheduled-send] Mailbox "${mailboxId}" is disabled, cancelling doc "${docRef.id}"`);
+    return cancelScheduledDocSkipped(
+      docRef,
+      followupIdEarly,
+      "mailbox_disabled",
+      "Mailbox is disabled.",
+    );
   }
 
   console.log(`[scheduled-send] Mailbox verified: "${mailbox.emailAddress}" (host: "${mailbox.smtp.host}:${mailbox.smtp.port}", user: "${mailbox.smtp.user ? "configured" : "empty"}", owner: "${mailboxOwnerUid}")`);

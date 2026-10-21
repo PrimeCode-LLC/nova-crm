@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 import { getMailboxProfileServer } from "@/lib/email/mailbox-profiles-server";
 import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
 import { outboundAttachmentsToLeadMail } from "@/lib/email/lead-mail-attachments";
@@ -14,6 +13,7 @@ import {
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
+import { isSuppressed } from "@/lib/email/suppression-server";
 import { recordEmailSendEventServer } from "@/lib/email/record-email-send-event-server";
 import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 
@@ -54,22 +54,33 @@ export async function POST(req: Request) {
 
     const smtp = b.smtp as Record<string, unknown> | undefined;
     const imap = b.imap as Record<string, unknown> | undefined;
-    const host = normalizeMailHost(String(smtp?.host ?? ""));
-    const port = Number(smtp?.port ?? 587);
-    const secure = Boolean(smtp?.secure);
+    // A saved mailbox always sends with its own server settings: the request
+    // must not be able to send the vault credentials to another host (QA 1.5).
+    const profile = mailboxId
+      ? await getMailboxProfileServer({
+          organizationId: g.ctx.session.organizationId,
+          uid: dataOwnerUid,
+          mailboxId,
+        })
+      : null;
+    if (mailboxId && !profile) {
+      return NextResponse.json({ ok: false, error: "Mailbox not found." }, { status: 404 });
+    }
+    if (profile && profile.enabled === false) {
+      return NextResponse.json(
+        { ok: false, error: "This mailbox is disabled. Enable it in Settings to send." },
+        { status: 409 },
+      );
+    }
+    const host = normalizeMailHost(profile ? profile.smtp.host : String(smtp?.host ?? ""));
+    const port = profile ? profile.smtp.port : Number(smtp?.port ?? 587);
+    const secure = profile ? profile.smtp.secure : Boolean(smtp?.secure);
     let user = String(smtp?.user ?? "").trim();
     let pass = String(smtp?.pass ?? "");
-    if (mailboxId) {
-      const secrets = await getMailboxSecretsServer({
-        organizationId: g.ctx.session.organizationId,
-        uid: dataOwnerUid,
-        mailboxId,
-      });
-      if (secrets) {
-        const fromVault = secrets.smtp.user.trim();
-        if (fromVault) user = fromVault;
-        if (secrets.smtp.password) pass = secrets.smtp.password;
-      }
+    if (profile) {
+      const fromVault = profile.smtp.user.trim();
+      if (fromVault) user = fromVault;
+      if (profile.smtp.password) pass = profile.smtp.password;
     }
     const from = String(b.from ?? "").trim();
     const displayName = String(b.displayName ?? "").trim();
@@ -103,20 +114,29 @@ export async function POST(req: Request) {
       );
     }
 
-    let connectionType: string | undefined;
-    let trackOpens = false;
-    let trackClicks = false;
+    const recipients = [to, cc, bcc]
+      .flatMap((list) => list.split(/[,;]/))
+      .map((addr) => (addr.match(/<([^>]+)>/)?.[1] ?? addr).trim())
+      .filter(Boolean);
+    for (const email of recipients) {
+      if (await isSuppressed({ organizationId: g.ctx.session.organizationId, email })) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `${email} has unsubscribed or bounced and cannot be emailed.`,
+            code: "recipient_suppressed",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    const connectionType = profile?.connectionType;
+    const trackOpens = Boolean(profile?.readReceipts);
+    const trackClicks = Boolean(profile?.trackClicks);
     let reservedSend = false;
     let reservedMailboxId = "";
-    if (mailboxId) {
-      const profile = await getMailboxProfileServer({
-        organizationId: g.ctx.session.organizationId,
-        uid: dataOwnerUid,
-        mailboxId,
-      });
-      connectionType = profile?.connectionType;
-      trackOpens = Boolean(profile?.readReceipts);
-      trackClicks = Boolean(profile?.trackClicks);
+    if (profile) {
       const quota = await reserveMailboxDailySendServer({
         organizationId: g.ctx.session.organizationId,
         uid: dataOwnerUid,
@@ -133,7 +153,7 @@ export async function POST(req: Request) {
       reservedMailboxId = mailboxId;
     }
 
-    const imapHost = normalizeMailHost(String(imap?.host ?? ""));
+    const imapHost = normalizeMailHost(profile ? profile.imap.host : String(imap?.host ?? ""));
     const result = await sendOutboundMailServer({
       organizationId: g.ctx.session.organizationId,
       uid: dataOwnerUid,
@@ -142,10 +162,10 @@ export async function POST(req: Request) {
       imap: imapHost
         ? {
             host: imapHost,
-            port: Number(imap?.port ?? 993),
-            secure: Boolean(imap?.secure),
-            user: String(imap?.user ?? ""),
-            pass: String(imap?.pass ?? ""),
+            port: profile ? profile.imap.port : Number(imap?.port ?? 993),
+            secure: profile ? profile.imap.secure : Boolean(imap?.secure),
+            user: profile?.imap.user || String(imap?.user ?? ""),
+            pass: profile?.imap.password || String(imap?.pass ?? ""),
           }
         : undefined,
       appendSentCopy:
