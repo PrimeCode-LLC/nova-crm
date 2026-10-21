@@ -15,7 +15,9 @@ const createSchema = z.object({
   sourceReference: z.string().trim().max(200).optional(),
   destination: z.string().trim().max(500).optional(),
   idempotencyKey: z.string().trim().min(1).max(200).optional(),
-});
+})
+  // Unknown keys are garbage input, not an empty draft (QA 2.8 / ROB-06).
+  .strict();
 
 export async function GET(req: Request) {
   const guarded = await guardTenantApi();
@@ -72,10 +74,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  // A draft needs some content; garbage objects used to create blank drafts (QA 2.8 / ROB-06).
-  if (!parsed.data.values && !parsed.data.form) {
-    return Response.json({ error: "values or form is required" }, { status: 400 });
-  }
+
   const draft = await createManualProspectDraft({
     organizationId: guarded.ctx.session.organizationId,
     userId: guarded.ctx.session.uid,
