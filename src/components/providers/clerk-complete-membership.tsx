@@ -12,6 +12,19 @@ import {
   peekInviteTokens,
 } from "@/components/providers/clerk-invite-stash";
 
+/** 4xx other than auth-not-ready / timeout / rate limit: retrying cannot help. */
+export function isDefinitiveRejection(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 429;
+}
+
+function stripInviteParamsFromUrl(): void {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("invite") && !url.searchParams.has("join")) return;
+  url.searchParams.delete("invite");
+  url.searchParams.delete("join");
+  window.history.replaceState(window.history.state, "", url.toString());
+}
+
 /**
  * After Clerk sign-in/up, consume stashed invite/join tokens via
  * `POST /api/auth/clerk-complete-membership` (marks invite accepted + upserts member).
@@ -61,6 +74,14 @@ export function ClerkCompleteMembership() {
         }
         if (!res.ok || !data.ok) {
           inFlightRef.current = false;
+          // A definitive rejection (revoked / expired / invalid invite) will
+          // never succeed: drop the token so it is not retried with an error
+          // toast on every page (QA 3.4 / ROB-04, TEAM-03). Keep it for
+          // transient failures so a later page load can retry.
+          if (isDefinitiveRejection(res.status)) {
+            clearInviteTokens();
+            stripInviteParamsFromUrl();
+          }
           toast.error(data.error || "Could not accept invite", {
             description: "Ask an admin to resend the invite, then try again.",
           });
