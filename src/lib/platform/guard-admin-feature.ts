@@ -5,9 +5,9 @@ import { userHasAdminFeature, normalizeFeatureGrants } from "@/lib/admin-feature
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
-import { canAction, type PermissionSubject } from "@/lib/permissions/can";
+import { can, canAction, type PermissionSubject } from "@/lib/permissions/can";
 import { parseComputedPermissionsDoc } from "@/lib/permissions/computed-permissions";
-import type { ActionKey } from "@/lib/permissions/catalog";
+import type { ActionKey, ModuleCapability, ModuleKey } from "@/lib/permissions/catalog";
 import type { EffectivePermissionSnapshot } from "@/lib/permissions/role-types";
 import type { Role, User } from "@/lib/types";
 import { defaultCrmRoleIdForOrgRole } from "@/lib/platform/crm-role-defaults";
@@ -177,4 +177,43 @@ export async function guardPermissionAction(
   }
 
   return { ok: true, ctx: base.ctx, actor, roleSnapshot };
+}
+
+/** Permission subject for an authenticated tenant request (users doc + computed role snapshot). */
+export async function loadPermissionSubjectServer(
+  ctx: TenantApiContext,
+): Promise<PermissionSubject> {
+  const db = getAdminDb();
+  if (!db) return withSnapshot(actorFromTenantSession(ctx), null);
+  const snap = await db.collection(COLLECTIONS.users).doc(ctx.session.uid).get();
+  const actor = snap.exists
+    ? asUserFromAdmin(ctx.session.uid, snap.data()!)
+    : actorFromTenantSession(ctx);
+  return withSnapshot(actor, await loadRoleSnapshot(actor.id));
+}
+
+export type CrmModuleEntity = "lead" | "account" | "contact" | "deal";
+
+const ENTITY_MODULES: Record<CrmModuleEntity, ModuleKey[]> = {
+  // Prospects are leads with intakeKind "prospect"; either module covers lead rows.
+  lead: ["leads", "prospects"],
+  account: ["accounts"],
+  contact: ["contacts"],
+  deal: ["deals"],
+};
+
+/**
+ * Server-side CRM module permission check (QA 1.3). Org owners/admins always
+ * pass; everyone else needs the role-catalog capability on the entity's module.
+ */
+export async function crmModuleAllowedServer(
+  ctx: TenantApiContext,
+  entity: CrmModuleEntity,
+  capabilities: ModuleCapability[],
+): Promise<boolean> {
+  if (ctx.role === "owner" || ctx.role === "admin") return true;
+  const subject = await loadPermissionSubjectServer(ctx);
+  return ENTITY_MODULES[entity].some((module) =>
+    capabilities.some((capability) => can(subject, module, capability)),
+  );
 }

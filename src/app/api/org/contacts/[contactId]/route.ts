@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { viewerCanSeeCrmRecord } from "@/lib/db/crm-record-scope";
+import { crmModuleAllowedServer } from "@/lib/platform/guard-admin-feature";
 import { getContactFromPostgres } from "@/lib/db/list-crm-postgres";
 
 export async function GET(
@@ -18,10 +19,14 @@ export async function GET(
   if (!id) return NextResponse.json({ error: "contactId required" }, { status: 400 });
   const contact = await getContactFromPostgres(g.ctx.session.organizationId, id);
   if (!contact) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const visible = await viewerCanSeeCrmRecord(
-    { organizationId: g.ctx.session.organizationId, uid: g.ctx.session.uid, orgRole: g.ctx.role },
-    { entity: "contact", value: contact },
-  );
+  const viewer = {
+    organizationId: g.ctx.session.organizationId,
+    uid: g.ctx.session.uid,
+    orgRole: g.ctx.role,
+  };
+  const visible =
+    (await crmModuleAllowedServer(g.ctx, "contact", ["view"])) &&
+    (await viewerCanSeeCrmRecord(viewer, { entity: "contact", value: contact }));
   if (!visible) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true, contact });
 }

@@ -14,6 +14,7 @@ import {
 import { isPostgresReadCrmV1Enabled } from "@/lib/db/postgres-read-crm-flags";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { crmModuleAllowedServer } from "@/lib/platform/guard-admin-feature";
 
 /**
  * GET /api/org/deals — feature-flagged Postgres deals list (P6.1).
@@ -25,6 +26,20 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 export async function GET(req: Request) {
   const guard = await guardTenantApi();
   if (!guard.ok) return guard.response;
+
+  // QA 1.3: roles without view access on this module get an empty list (not an error),
+  // so shared shell queries keep working for e.g. the content team.
+  if (!(await crmModuleAllowedServer(guard.ctx, "deal", ["view"]))) {
+    return NextResponse.json({
+      ok: true,
+      enabled: true,
+      deals: [],
+      source: "postgres" as const,
+      count: 0,
+      hasMore: false,
+      nextCursor: null,
+    });
+  }
 
   if (!isPostgresReadCrmV1Enabled()) {
     return NextResponse.json({ ok: true, enabled: false, deals: [], source: null });

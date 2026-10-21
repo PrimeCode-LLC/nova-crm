@@ -13,6 +13,8 @@ import {
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { crmModuleAllowedServer } from "@/lib/platform/guard-admin-feature";
+import type { ModuleCapability } from "@/lib/permissions/catalog";
 
 const entitySchema = z.enum(["account", "contact", "lead", "deal"]);
 
@@ -119,6 +121,25 @@ export async function POST(req: Request) {
   const viewerRole = guard.ctx.role;
   const viewerUid = guard.ctx.session.uid;
   const body = parsed.data;
+
+  const moduleEntity: CrmEntity =
+    body.action === "upsert_graph" || body.action === "bump_lead_activity"
+      ? "lead"
+      : (body.entity as CrmEntity);
+  const capabilities: ModuleCapability[] =
+    body.action === "delete"
+      ? ["delete"]
+      : body.action === "patch"
+        ? ["edit"]
+        : body.action === "bump_lead_activity"
+          ? ["view"]
+          : ["create", "edit"];
+  if (!(await crmModuleAllowedServer(guard.ctx, moduleEntity, capabilities))) {
+    return NextResponse.json(
+      { ok: false, error: `Your role does not allow this change (${moduleEntity}).` },
+      { status: 403 },
+    );
+  }
 
   try {
     if (body.action === "bump_lead_activity") {

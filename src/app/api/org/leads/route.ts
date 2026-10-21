@@ -12,6 +12,7 @@ import {
 import { isPostgresReadLeadsV1Enabled } from "@/lib/db/postgres-read-leads-flags";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { crmModuleAllowedServer } from "@/lib/platform/guard-admin-feature";
 import { countCompanyProspectsForActor } from "@/lib/prospects/count-company-prospects-server";
 
 /**
@@ -32,6 +33,20 @@ import { countCompanyProspectsForActor } from "@/lib/prospects/count-company-pro
 export async function GET(req: Request) {
   const guard = await guardTenantApi();
   if (!guard.ok) return guard.response;
+
+  // QA 1.3: roles without view access on this module get an empty list (not an error),
+  // so shared shell queries keep working for e.g. the content team.
+  if (!(await crmModuleAllowedServer(guard.ctx, "lead", ["view"]))) {
+    return NextResponse.json({
+      ok: true,
+      enabled: true,
+      leads: [],
+      source: "postgres" as const,
+      count: 0,
+      hasMore: false,
+      nextCursor: null,
+    });
+  }
 
   if (!isPostgresReadLeadsV1Enabled()) {
     return NextResponse.json({ ok: true, enabled: false, leads: [], source: null });
