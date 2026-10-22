@@ -75,6 +75,8 @@ export function useCrmEntityPages(opts: {
   includeTotalCount?: boolean;
   /** Auto-fetch remaining pages (deduped by id). Default false. */
   drain?: boolean;
+  /** Leads only: total rows matching `filters` (`countOnly=1`), not just the loaded pages. */
+  includeFilteredCount?: boolean;
 }) {
   const flagOn = isWorkspaceCrmPollV2Enabled() || isWorkspaceCrmSnapshotOff();
   const enabled = Boolean(opts.enabled) && flagOn;
@@ -168,6 +170,31 @@ export function useCrmEntityPages(opts: {
     },
   });
 
+  const filteredCountQuery = useQuery({
+    queryKey: ["org", "crm-counts", "leads-filtered", narrow ? "1" : "0", filterKey],
+    enabled: enabled && opts.entity === "leads" && Boolean(opts.includeFilteredCount),
+    staleTime: 60_000,
+    queryFn: async () => {
+      const params = new URLSearchParams({ countOnly: "1" });
+      if (narrow) params.set("narrow", "1");
+      appendLeadFilters(params, opts.filters);
+      const res = await fetch(`/api/org/leads?${params.toString()}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const json = (await res.json()) as { ok?: boolean; totalCount?: number; error?: string };
+      if (!res.ok || json.ok === false) throw new Error(json.error || "lead count failed");
+      return typeof json.totalCount === "number" ? json.totalCount : null;
+    },
+  });
+
+  // Fetches every remaining page (e.g. before an export of all matching rows).
+  const fetchNextPage = query.fetchNextPage;
+  const loadAll = React.useCallback(async () => {
+    let r = await fetchNextPage();
+    while (r.hasNextPage && !r.isError) r = await fetchNextPage();
+  }, [fetchNextPage]);
+
   const totalCount =
     opts.includeTotalCount && countsQuery.data
       ? (countsQuery.data[opts.entity] ?? null)
@@ -185,6 +212,8 @@ export function useCrmEntityPages(opts: {
     error: query.error instanceof Error ? query.error.message : null,
     hasNextPage: Boolean(query.hasNextPage),
     fetchNextPage: query.fetchNextPage,
+    loadAll,
+    filteredCount: filteredCountQuery.data ?? null,
     refetch: query.refetch,
   };
 }

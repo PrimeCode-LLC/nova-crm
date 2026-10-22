@@ -505,6 +505,10 @@ export interface LeadsTableProps {
    * `archived` shows only archived rows and swaps bulk actions to restore / delete.
    */
   listMode?: "active" | "archived";
+  /** Debounced search text, so the page can fetch server matches beyond the loaded rows. */
+  onSearchChange?: (q: string) => void;
+  /** Total matching rows on the server (shown when more exist than are loaded). */
+  serverTotal?: number | null;
 }
 
 export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
@@ -519,6 +523,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     linkFromKey,
     initialOwnerScope = "all-owners",
     listMode = "active",
+    onSearchChange,
+    serverTotal,
   },
   ref,
 ) {
@@ -577,6 +583,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     { id: "created", desc: true },
   ]);
   const [globalFilter, setGlobalFilter] = React.useState("");
+  React.useEffect(() => {
+    if (!onSearchChange) return;
+    const t = setTimeout(() => onSearchChange(globalFilter.trim()), 300);
+    return () => clearTimeout(t);
+  }, [globalFilter, onSearchChange]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(() =>
     mergeUrlColumnFilters(preset, initialChannels, initialStages),
   );
@@ -2802,6 +2813,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                   {start}–{end}
                 </span>{" "}
                 of <span className="tabular-nums">{total}</span> {entityLabel}
+                {!globalFilter && serverTotal != null && serverTotal > leads.length ? (
+                  <> loaded · <span className="tabular-nums">{serverTotal}</span> total</>
+                ) : null}
               </>
             );
           })()}

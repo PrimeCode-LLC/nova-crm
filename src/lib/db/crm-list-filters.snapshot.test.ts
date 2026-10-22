@@ -66,4 +66,11 @@ describe("lead list filters added for snapshot cutover", () => {
     expect(serialized).not.toContain('"companyName":{"contains"');
     expect(companyContains).toBe(true);
   });
+
+  it("q also matches the contact email, lowercased (QA LEAD-01)", () => {
+    const where = leadListFilterWhere({ q: "Person7@ImportCo7.test" });
+    expect(JSON.stringify(where)).toContain(
+      '{"payload":{"path":["contactEmail"],"string_contains":"person7@importco7.test"}}',
+    );
+  });
 });

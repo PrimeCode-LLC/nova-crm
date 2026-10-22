@@ -25,6 +25,7 @@ import { ProspectDraftBanner } from "@/components/prospects/prospect-draft-banne
 import { filterActiveLeads } from "@/lib/leads/lead-archive";
 import { useCrmEntityPages } from "@/hooks/use-crm-entity-pages";
 import { CrmListLoadMore } from "@/components/common/crm-list-load-more";
+import { mergeCrmListPagesById } from "@/lib/db/crm-list-keyset";
 
 const LeadsTable = dynamic(
   () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
@@ -39,15 +40,39 @@ function ProspectsPageInner() {
   const ownerScope = ownerScopeFromQueryParam(searchParams.get("owner"));
   const { leads: wsLeads, isDemo, workspaceLoading } = useWorkspace();
   const { openNewProspectForm } = useOpenQuickAdd();
+  const crmFilters = React.useMemo(
+    () => ({ activeOnly: true, intakeKind: "prospect" }),
+    [],
+  );
   const crmPages = useCrmEntityPages({
     entity: "leads",
     enabled: !isDemo,
-    filters: { activeOnly: true, intakeKind: "prospect" },
+    filters: crmFilters,
+    includeFilteredCount: true,
+  });
+  // QA LEAD-01: search the server too, so rows beyond the loaded pages can be found.
+  const [search, setSearch] = React.useState("");
+  const searchPages = useCrmEntityPages({
+    entity: "leads",
+    enabled: !isDemo && search.length >= 2,
+    filters: { ...crmFilters, q: search },
   });
   const leads = React.useMemo(() => {
-    if (crmPages.enabled) return crmPages.items as typeof wsLeads;
+    if (crmPages.enabled) {
+      return mergeCrmListPagesById([crmPages.items, searchPages.items]) as typeof wsLeads;
+    }
     return wsLeads;
-  }, [crmPages.enabled, crmPages.items, wsLeads]);
+  }, [crmPages.enabled, crmPages.items, searchPages.items, wsLeads]);
+  // QA IMP-08: export covers every matching row, not just the loaded pages.
+  // Bumped after all pages load; the effect runs once the table has the full row set.
+  const [exportRequest, setExportRequest] = React.useState(0);
+  React.useEffect(() => {
+    if (exportRequest) tableRef.current?.exportFilteredCsv();
+  }, [exportRequest]);
+  const exportAll = async () => {
+    if (crmPages.enabled && crmPages.hasNextPage) await crmPages.loadAll();
+    setExportRequest((n) => n + 1);
+  };
   const listLoading = workspaceLoading || (crmPages.enabled && crmPages.loading);
   const tableRef = React.useRef<LeadsTableRef>(null);
   const [tableSession, setTableSession] = React.useState<{
@@ -201,7 +226,7 @@ function ProspectsPageInner() {
               size="sm"
               type="button"
               disabled={prospectCount === 0}
-              onClick={() => tableRef.current?.exportFilteredCsv()}
+              onClick={() => void exportAll()}
             >
               <Download className="h-3.5 w-3.5" /> Export
             </Button>
@@ -230,6 +255,8 @@ function ProspectsPageInner() {
             lockedIntakeScope="prospect"
             linkFromKey="prospects"
             initialOwnerScope={ownerScope}
+            onSearchChange={setSearch}
+            serverTotal={crmPages.filteredCount}
           />
         )}
         <CrmListLoadMore

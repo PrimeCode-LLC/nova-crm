@@ -154,6 +154,8 @@ export function leadListFilterWhere(
     ];
     if (!companyNameExact) {
       or.push({ companyName: { contains: q, mode: "insensitive" } });
+      // shortcut: JSON string_contains is case-sensitive; intake stores contactEmail lowercased (normalizedEmail).
+      or.push({ payload: { path: ["contactEmail"], string_contains: q.toLowerCase() } });
     }
     parts.push({ OR: or });
   }
