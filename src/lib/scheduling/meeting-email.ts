@@ -108,6 +108,23 @@ export function renderMeetingCancellationEmail(input: {
   return { subject, html, text };
 }
 
+/** Tells the host someone booked time with them (QA SCH-03). */
+export function renderHostBookingNoticeEmail(input: {
+  meeting: Meeting;
+}): { subject: string; html: string; text: string } {
+  const { meeting } = input;
+  const when = formatMeetingWhen(meeting);
+  const who = `${meeting.attendeeName} <${meeting.attendeeEmail}>`;
+  const notes = meeting.attendeeNotes?.trim();
+  const subject = `New booking: ${meeting.title} with ${meeting.attendeeName}`;
+  const lines = [`${who} booked ${meeting.title}.`, when];
+  if (notes) lines.push(`Notes: ${notes}`);
+  const text = [...lines, "", `- ${SITE.name}`].join("\n");
+  const html = `<p>${escapeHtml(who)} booked <strong>${escapeHtml(meeting.title)}</strong>.</p>
+<p>${escapeHtml(when)}</p>${notes ? `<p>Notes: ${escapeHtml(notes)}</p>` : ""}`;
+  return { subject, html, text };
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")

@@ -66,6 +66,11 @@ describe.skipIf(!runDb)("meeting cancellation email (QA 2.3)", () => {
       source: "public_link", skipAccessCheck: true,
     });
     if ("error" in booked) throw new Error(booked.error);
+    // Public booking: the host gets a notice too (QA SCH-03).
+    const hostNotice = (sendSystemEmail.mock.calls as unknown as [Record<string, unknown>][]).find(
+      ([m]) => m.to === "host@nova.test",
+    )?.[0];
+    expect(hostNotice?.subject).toBe("New booking: QA Intro Call with Pat");
     sendSystemEmail.mockClear();
 
     const res = await updateMeetingStatusServer({

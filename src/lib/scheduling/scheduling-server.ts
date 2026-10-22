@@ -17,6 +17,7 @@ import {
 } from "@/lib/scheduling/availability-slots";
 import { zonedDayKey } from "@/lib/org-timezone";
 import {
+  renderHostBookingNoticeEmail,
   renderMeetingCancellationEmail,
   renderMeetingConfirmationEmail,
 } from "@/lib/scheduling/meeting-email";
@@ -854,6 +855,21 @@ export async function bookMeetingServer(input: {
           ]
         : undefined,
     }).catch(() => undefined);
+
+    // The host is not the attendee: tell them someone booked them (QA SCH-03).
+    const hostEmail = host?.email?.trim();
+    if (hostEmail && input.bookedById !== input.hostId) {
+      const notice = renderHostBookingNoticeEmail({ meeting });
+      await sendSystemEmail({
+        to: hostEmail,
+        subject: notice.subject,
+        html: notice.html,
+        text: notice.text,
+        attachments: ics
+          ? [{ filename: "invite.ics", contentType: "text/calendar; method=REQUEST", content: Buffer.from(ics, "utf8") }]
+          : undefined,
+      }).catch(() => undefined);
+    }
   }
 
   return {
