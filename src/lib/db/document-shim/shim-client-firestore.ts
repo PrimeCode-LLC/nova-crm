@@ -174,6 +174,11 @@ function registerListener(path: string, kick: () => void): () => void {
   };
 }
 
+/** Re-poll every listener on a collection now (e.g. after a server push). */
+export function refreshCollectionListeners(collectionPath: string): void {
+  listenersByPath.get(collectionPath)?.forEach((kick) => kick());
+}
+
 const writeSubscribers = new Set<(collectionRoot: string) => void>();
 
 /**

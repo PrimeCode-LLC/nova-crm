@@ -13,6 +13,7 @@ import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-pro
 import { TeamChatUnreadProvider } from "@/components/providers/team-chat-unread-provider";
 import { WorkspaceInboxNotificationsProvider } from "@/components/providers/workspace-inbox-notifications-provider";
 import { DeferredAppSync } from "@/components/providers/deferred-app-sync";
+import { WorkspaceLiveUpdates } from "@/components/providers/workspace-live-updates";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
 import { ModuleRouteGate } from "@/components/permissions/module-route-gate";
 import { WORKSPACE_MODE_COOKIE, parseWorkspaceMode } from "@/lib/workspace-mode";
@@ -85,6 +86,7 @@ export default async function AppLayout({
       <TeamChatUnreadProvider deferSubscriptions>
         <WorkspaceInboxNotificationsProvider>
           <DeferredAppSync />
+          <WorkspaceLiveUpdates />
           <QuickAddLauncherProvider>
             <SidebarProvider>
               <AppSidebar showPlatformLink={showPlatformLink} />

@@ -7,6 +7,12 @@ vi.mock("@/lib/platform/tenant-api-guard", () => ({
   guardTenantApi,
 }));
 
+const publishWorkspaceChange = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("@/lib/realtime/sse", async (orig) => ({
+  ...(await orig<typeof import("@/lib/realtime/sse")>()),
+  publishWorkspaceChange,
+}));
+
 vi.mock("@/lib/db/document-shim/store", () => ({
   getDocument: vi.fn(),
   queryDocuments: vi.fn(),
@@ -180,5 +186,21 @@ describe("/api/org/workspace-documents notification privacy (QA 1.4)", () => {
     );
     expect(created.status).toBe(200);
     expect(setDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it("pushes a live-update signal for chat writes only (RT-01)", async () => {
+    vi.mocked(getDocument).mockResolvedValue(null);
+    const put = (path: string) =>
+      PUT(
+        new Request("https://nova.test/api/org/workspace-documents", {
+          method: "PUT",
+          body: JSON.stringify({ path, data: { text: "hi" } }),
+        }),
+      );
+    expect((await put("workspaceChatMessages/m1")).status).toBe(200);
+    expect(publishWorkspaceChange).toHaveBeenCalledWith("org-1", "workspaceChatMessages");
+    publishWorkspaceChange.mockClear();
+    expect((await put("notes/n1")).status).toBe(200);
+    expect(publishWorkspaceChange).not.toHaveBeenCalled();
   });
 });

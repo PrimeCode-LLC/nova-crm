@@ -1,5 +1,6 @@
 import { requireTenantSession } from "@/lib/auth/server";
 import { getRedis } from "@/lib/cache/redis";
+import { workspaceTopic } from "@/lib/realtime/sse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +11,8 @@ export async function GET(req: Request) {
   const channel = url.searchParams.get("channel") ?? "notifications";
   const orgId = session.organizationId;
   const uid = session.uid;
-  const topic = `realtime:org:${orgId}:${channel}:${uid}`;
+  const topic =
+    channel === "workspace" ? workspaceTopic(orgId) : `realtime:org:${orgId}:${channel}:${uid}`;
 
   const redis = await getRedis();
   if (!redis) {

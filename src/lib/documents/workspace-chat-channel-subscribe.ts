@@ -36,7 +36,10 @@ export function subscribeWorkspaceChatChannelsForUser(
       onError(errors[0]!);
       return;
     }
-    const merged = [...publicRows, ...dmRows].sort((a, b) => a.name.localeCompare(b.name));
+    // The Postgres document shim ignores `where`, so both queries can return the same channel.
+    const merged = [...new Map([...publicRows, ...dmRows].map((c) => [c.id, c])).values()].sort(
+      (a, b) => a.name.localeCompare(b.name),
+    );
     onChannels(merged);
   };
 

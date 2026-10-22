@@ -20,6 +20,7 @@ import {
   workspaceDocSeesAll,
 } from "@/lib/db/workspace-document-member-scope";
 import { COLLECTIONS } from "@/lib/documents/collections";
+import { publishWorkspaceChange, WORKSPACE_LIVE_COLLECTIONS } from "@/lib/realtime/sse";
 import { crmDocAccessDenied, filterCrmDocsForViewer, type CrmDocOp } from "@/lib/db/crm-document-access";
 import { guardTenantApi, type TenantApiContext } from "@/lib/platform/tenant-api-guard";
 
@@ -179,6 +180,13 @@ async function forbidIfMemberCannotAccessDoc(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   return null;
+}
+
+/** Push a change signal for live collections (chat) to open tabs; never blocks the write. */
+function announceWrite(organizationId: string, path: string): void {
+  const root = collectionRootOf(path);
+  if (!WORKSPACE_LIVE_COLLECTIONS.has(root)) return;
+  void publishWorkspaceChange(organizationId, root).catch(() => undefined);
 }
 
 /** CRM rows get crm-write's module + record-scope checks (QA 1.8). */
@@ -422,6 +430,7 @@ export async function PUT(req: Request) {
       organizationId,
     };
     await setDocument(body.path, data, body.merge ?? false);
+    announceWrite(organizationId, body.path);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[workspace-documents PUT]", err);
@@ -477,6 +486,7 @@ export async function PATCH(req: Request) {
       ...decodeClientFieldValues(body.patch),
       organizationId,
     });
+    announceWrite(organizationId, body.path);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[workspace-documents PATCH]", err);
@@ -527,6 +537,7 @@ export async function DELETE(req: Request) {
     if (crmDenied) return crmDenied;
 
     await deleteDocument(body.path);
+    announceWrite(organizationId, body.path);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[workspace-documents DELETE]", err);
