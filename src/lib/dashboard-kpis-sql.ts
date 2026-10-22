@@ -307,7 +307,13 @@ async function queryChannelMix(
     SELECT
       l.channel,
       COUNT(*)::bigint AS count,
-      COUNT(*) FILTER (WHERE l.stage = 'won')::bigint AS won
+      COUNT(*) FILTER (
+        WHERE l.stage = 'won'
+          OR EXISTS (
+            SELECT 1 FROM deals d
+            WHERE d.organization_id = l.organization_id AND d.lead_id = l.id AND d.stage = 'won'
+          )
+      )::bigint AS won
     FROM leads l
     WHERE l.organization_id = ${organizationId}
       AND (l.intake_kind IS NULL OR l.intake_kind <> 'prospect')

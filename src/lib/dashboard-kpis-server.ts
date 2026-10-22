@@ -408,7 +408,7 @@ export function computeScopedDashboardKpis(input: {
       leadEstimateContributors: pipelineMetrics.leadEstimateContributors,
     },
     pipelineByStage: computePipelineByStage(salesLeads),
-    channelMix: computeChannelMix(salesLeads),
+    channelMix: computeChannelMix(salesLeads, scopedDeals),
     funnelByChannel: computeFunnelByChannel(salesLeads, scopedDeals),
     closedRevenue: wonInScope.reduce((s, d) => s + d.value, 0),
     wonDealCount: wonInScope.length,

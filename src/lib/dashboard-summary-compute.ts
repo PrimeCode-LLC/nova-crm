@@ -59,8 +59,11 @@ export type OrgChannelMixRow = { count: number; won: number };
 
 /** Sales-lead volume + wins per channel (matches ChannelMix widget). */
 export function computeChannelMix(
-  leads: readonly Pick<Lead, "channel" | "stage" | "intakeKind">[],
+  leads: readonly (Pick<Lead, "channel" | "stage" | "intakeKind"> & { id?: string })[],
+  deals: readonly Pick<Deal, "leadId" | "stage">[] = [],
 ): Record<string, OrgChannelMixRow> {
+  // A lead with a won deal counts as won even if the lead's own stage was not moved (CRM-04).
+  const wonLeadIds = new Set(deals.filter((d) => d.stage === "won").map((d) => d.leadId));
   const out: Record<string, OrgChannelMixRow> = {};
   for (const lead of leads) {
     if (lead.intakeKind === "prospect") continue;
@@ -68,7 +71,7 @@ export function computeChannelMix(
     if (!key) continue;
     const row = out[key] ?? { count: 0, won: 0 };
     row.count += 1;
-    if (lead.stage === "won") row.won += 1;
+    if (lead.stage === "won" || (lead.id && wonLeadIds.has(lead.id))) row.won += 1;
     out[key] = row;
   }
   return out;
@@ -246,7 +249,7 @@ export function computeOrgDashboardSummaryFields(input: {
     ...point,
     ...gauges,
     pipelineByStage: computePipelineByStage(pipelineLeads),
-    channelMix: computeChannelMix(input.leads),
+    channelMix: computeChannelMix(input.leads, input.deals),
     funnelByChannel: computeFunnelByChannel(input.leads as Lead[], input.deals as Deal[]),
     ranges: computeAllOrgRangeMetrics(input),
   };

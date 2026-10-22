@@ -218,6 +218,22 @@ describe("channel mix + apply (P0.10)", () => {
     });
   });
 
+  it("counts a lead with a won deal as a win (CRM-04)", async () => {
+    const { computeChannelMix } = await import("@/lib/dashboard-summary-compute");
+    expect(
+      computeChannelMix(
+        [
+          { id: "l1", channel: "cold_email", stage: "negotiation" },
+          { id: "l2", channel: "cold_email", stage: "new" },
+        ],
+        [
+          { leadId: "l1", stage: "won" },
+          { leadId: "l2", stage: "lost" },
+        ],
+      ),
+    ).toEqual({ cold_email: { count: 2, won: 1 } });
+  });
+
   it("applies summary scalars and range windows onto live metrics", async () => {
     const { applyOrgDashboardSummaryToWorkflowMetrics } = await import(
       "@/lib/dashboard-summary-apply"

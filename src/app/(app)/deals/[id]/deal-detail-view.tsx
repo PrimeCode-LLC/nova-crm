@@ -3,7 +3,6 @@
 import * as React from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -16,6 +15,10 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
+import { PIPELINE_STAGES } from "@/lib/constants";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { PipelineStage } from "@/lib/types";
 import { useLocalDeals } from "@/hooks/use-local-deals";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
@@ -98,14 +101,27 @@ export function DealDetailView({ dealId }: { dealId: string }) {
           </div>
         }
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => toast.info("Deal editing will use your workspace API when connected.")}
+          // Move the deal through the pipeline, incl. Won / Lost (QA 2.11 / CRM-04).
+          <Select
+            value={deal.stage}
+            onValueChange={(v) => {
+              const patch = { stage: v as PipelineStage };
+              if (isLocalDeal) patchLocalDeal(deal.id, patch);
+              else ws.patchDeal(deal.id, patch);
+              if (fetchedDeal?.id === deal.id) setFetchedDeal({ ...fetchedDeal, ...patch });
+            }}
           >
-            Edit
-          </Button>
+            <SelectTrigger size="sm" aria-label="Deal stage" className="min-w-[9rem]">
+              <SelectValue>{selectTriggerLabelByKey(deal.stage, PIPELINE_STAGES) ?? undefined}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {PIPELINE_STAGES.map((s) => (
+                <SelectItem key={s.key} value={s.key}>
+                  {s.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         }
       />
       <PageBody>
