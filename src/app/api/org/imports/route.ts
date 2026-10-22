@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/db/document-access/admin";
+import { serializePayloadValue } from "@/lib/db/document-shim/timestamp";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import type { ProspectImportJob } from "@/lib/imports/prospect-import-types";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
@@ -42,8 +43,9 @@ export async function GET() {
       .slice(0, 200);
   }
 
+  // The shim revives ISO `*At` strings as Timestamps; send ISO so the client can format dates.
   const jobs = docs.map((doc) => ({
-    ...(doc.data() as ProspectImportJob),
+    ...(serializePayloadValue(doc.data()) as ProspectImportJob),
     id: doc.id,
     issueSamples: (doc.data().issueSamples as ProspectImportJob["issueSamples"] | undefined) ?? [],
   }));
