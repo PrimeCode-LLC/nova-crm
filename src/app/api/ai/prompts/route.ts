@@ -22,6 +22,7 @@ const FEATURE_KEYS = [
   "content_plan_suggest",
   "content_draft_generate",
   "content_graphics_brief",
+  "strategy_assistant",
   "rag_index",
 ] as const;
 

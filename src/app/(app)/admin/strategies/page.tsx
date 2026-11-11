@@ -35,6 +35,7 @@ import {
 } from "@/lib/prospecting-strategy/allocation";
 import { countStrategyDayProgress } from "@/lib/prospecting-strategy/progress";
 import { UserChip } from "@/components/common/user-chip";
+import { StrategyAiPanel } from "@/components/strategies/strategy-ai-panel";
 
 const STATUS_TONE: Record<ProspectingStrategy["status"], string> = {
   draft: "secondary",
@@ -238,6 +239,7 @@ export default function AdminStrategiesPage() {
         description="Guidance, personas, signal focus, checklists, and assignments - scoring stays in Intent Playbook."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <StrategyAiPanel data={data} focusStrategyId={null} />
             <input
               ref={fileInputRef}
               type="file"

@@ -98,6 +98,7 @@ const PROMPT_GROUPS: {
       { key: "dashboard_brief", label: "Dashboard overview" },
       { key: "lead_analyze", label: "Lead analysis" },
       { key: "intent_suggest", label: "Intent signal suggest" },
+      { key: "strategy_assistant", label: "Strategy assistant" },
       { key: "prospect_draft_extract", label: "Prospect draft extraction" },
       { key: "intent_radar_evaluate", label: "Intent Radar evaluate" },
     ],

@@ -19,6 +19,7 @@ export type AiFeatureKey =
   | "content_plan_suggest"
   | "content_draft_generate"
   | "content_graphics_brief"
+  | "strategy_assistant"
   | "rag_index";
 
 export type AiRagMode = "strict" | "reference" | "open";
@@ -224,6 +225,10 @@ export const DEFAULT_AI_SETTINGS: OrganizationAiSettings = {
     content_graphics_brief: {
       enabled: true,
       ragMode: "reference",
+    },
+    strategy_assistant: {
+      enabled: true,
+      ragMode: "open",
     },
     rag_index: {
       enabled: true,

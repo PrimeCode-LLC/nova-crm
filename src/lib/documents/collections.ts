@@ -137,6 +137,8 @@ export const ORG_SUBCOLLECTIONS = {
   roles: "roles",
   /** Org-wide daily email send ledger (`{dayKey}` → booked count). */
   sendLedger: "sendLedger",
+  /** Strategy AI assistant chat history (`general` or `{strategyId}`). */
+  strategyAssistantThreads: "strategyAssistantThreads",
 } as const;
 
 /**

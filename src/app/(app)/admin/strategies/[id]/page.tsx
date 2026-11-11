@@ -54,6 +54,7 @@ import {
   DEFAULT_SEND_WINDOW_START_HOUR,
 } from "@/lib/email/audience-schedule";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import { StrategyAiPanel } from "@/components/strategies/strategy-ai-panel";
 
 const REVENUE_KEYS = Object.keys(REVENUE_RANGES) as RevenueRange[];
 
@@ -452,6 +453,7 @@ export default function StrategyDetailPage() {
         description="Edit guidance for researchers. Intent scoring still comes from the org Intent Playbook."
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <StrategyAiPanel data={data} focusStrategyId={id} />
             <Link
               href="/admin/strategies"
               className={cn(buttonVariants({ size: "sm", variant: "ghost" }))}
