@@ -23,7 +23,9 @@ import {
 import { AI_PROMPT_DEFAULTS } from "@/lib/ai/prompt-defaults";
 import {
   appendStrategyAssistantMessages,
+  isValidScope,
   isValidThreadKey,
+  listStrategyAssistantChats,
   loadStrategyAssistantThread,
   setStrategyAssistantProposalStatus,
   type StrategyAssistantMessage,
@@ -42,8 +44,6 @@ const threadKeySchema = z.string().refine(isValidThreadKey, "Invalid thread");
 const postSchema = z.object({
   threadKey: threadKeySchema,
   message: z.string().trim().min(1).max(8000),
-  /** Starts a new topic: earlier messages stay visible but are no longer sent to the model. */
-  newTopic: z.boolean().optional(),
   context: z.object({
     focusStrategyId: z.string().max(160).nullable(),
     strategies: z.array(z.record(z.string(), z.unknown())).max(300),
@@ -104,10 +104,18 @@ function describeForHistory(m: StrategyAssistantMessage): string {
   return parts.join(" ");
 }
 
+/** `?scope=` lists that page's chats; `?thread=` returns one chat's messages. */
 export async function GET(req: Request) {
   const g = await guardAdminFeature("prospecting_strategies");
   if (!g.ok) return g.response;
-  const threadKey = new URL(req.url).searchParams.get("thread") ?? "";
+  const params = new URL(req.url).searchParams;
+  const scope = params.get("scope");
+  if (scope !== null) {
+    if (!isValidScope(scope)) return NextResponse.json({ error: "Invalid scope" }, { status: 400 });
+    const chats = await listStrategyAssistantChats(g.ctx.session.organizationId, scope);
+    return NextResponse.json({ chats });
+  }
+  const threadKey = params.get("thread") ?? "";
   if (!isValidThreadKey(threadKey)) {
     return NextResponse.json({ error: "Invalid thread" }, { status: 400 });
   }
@@ -153,13 +161,8 @@ export async function POST(req: Request) {
     assignments: parsed.data.context.assignments as unknown as StrategyAssignment[],
   };
 
-  const prior = parsed.data.newTopic ? [] : await loadStrategyAssistantThread(orgId, threadKey);
-  const lastTopic = prior.findLastIndex((m) => m.topicStart);
-  const conversation = prior
-    .slice(lastTopic >= 0 ? lastTopic : 0)
-    .slice(-HISTORY_TURNS)
-    .map(describeForHistory)
-    .join("\n\n");
+  const prior = await loadStrategyAssistantThread(orgId, threadKey);
+  const conversation = prior.slice(-HISTORY_TURNS).map(describeForHistory).join("\n\n");
 
   let output;
   try {
@@ -247,7 +250,6 @@ export async function POST(req: Request) {
     userId: uid,
     userName: g.actor.displayName,
     createdAt: now,
-    ...(parsed.data.newTopic ? { topicStart: true } : {}),
   };
   const assistantMsg: StrategyAssistantMessage = {
     id: newMessageId(),
